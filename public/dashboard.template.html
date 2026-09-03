@@ -262,6 +262,10 @@
       color: #ff9800;
     }
 
+    .control-icon-button.always-visible {
+      display: flex;
+    }
+
     .status-indicator {
       display: flex;
       align-items: center;
@@ -1281,7 +1285,6 @@
           </div>
           <div class="service-header-right">
             <button id="node-start-button" class="control-icon-button start" title="Start Node.js Service">▶</button>
-            <button id="node-stop-button" class="control-icon-button stop" title="Stop Node.js Service">■</button>
             <button id="node-restart-button" class="control-icon-button restart" title="Restart Node.js Service">↻</button>
             <div class="status-indicator" id="node-status">
               <span class="status-dot red dimmed" id="node-status-red"></span>
@@ -1350,7 +1353,6 @@
           </div>
           <div class="service-header-right">
             <button id="python-start-button" class="control-icon-button start" title="Start Python Service">▶</button>
-            <button id="python-stop-button" class="control-icon-button stop" title="Stop Python Service">■</button>
             <button id="python-restart-button" class="control-icon-button restart" title="Restart Python Service">↻</button>
             <div class="status-indicator" id="python-status">
               <span class="status-dot red dimmed" id="python-status-red"></span>
@@ -1418,6 +1420,7 @@
             <h2>JavaScript Client</h2>
           </div>
           <div class="service-header-right">
+            <button id="javascript-refresh-button" class="control-icon-button restart always-visible" title="Refresh JavaScript Client">↻</button>
             <div class="status-indicator" id="javascript-status">
               <span class="status-dot red dimmed" id="javascript-status-red"></span>
               <span class="status-dot orange dimmed" id="javascript-status-orange"></span>
@@ -1485,7 +1488,6 @@
           </div>
           <div class="service-header-right">
             <button id="php-start-button" class="control-icon-button start" title="Start PHP Service">▶</button>
-            <button id="php-stop-button" class="control-icon-button stop" title="Stop PHP Service">■</button>
             <button id="php-restart-button" class="control-icon-button restart" title="Restart PHP Service">↻</button>
             <div class="status-indicator" id="php-status">
               <span class="status-dot red dimmed" id="php-status-red"></span>
@@ -1540,6 +1542,62 @@
           </div>
           <div id="php-sdk-cache" style="font-size: 12px; line-height: 1.6; color: #555; background-color: #f8f9fa; padding: 10px 10px 30px 10px; border-radius: 4px;">
             <div style="color: #999; font-style: italic;">Waiting for SDK to initialize...</div>
+          </div>
+        </div>
+        </div><!-- /.panel-body -->
+      </div>
+
+      <!-- Data System Builder -->
+      <div class="service-panel collapsed" id="data-system-panel">
+        <div class="service-header">
+          <div class="service-header-left">
+            <img src="launchdarkly-logo.svg" alt="LaunchDarkly" class="service-logo" />
+            <h2>Data System Builder</h2>
+          </div>
+          <div class="service-header-right">
+            <button id="data-system-refresh-button" class="control-icon-button restart always-visible" title="Refresh Data System Builder">↻</button>
+            <div class="status-indicator" id="data-system-status">
+              <span class="status-dot red dimmed" id="data-system-status-red"></span>
+              <span class="status-dot orange dimmed" id="data-system-status-orange"></span>
+              <span class="status-dot green dimmed" id="data-system-status-green"></span>
+            </div>
+            <button type="button" class="panel-collapse-toggle" aria-expanded="false" aria-label="Expand or collapse Data System Builder panel" title="Expand / collapse">▼</button>
+          </div>
+        </div>
+        <div class="panel-body">
+
+        <div class="ds-kicker">Python SDK · datasystem.custom()</div>
+        <div class="ds-subtitle">
+          Live fallback path: stream Relay first, then stream LaunchDarkly, then poll LaunchDarkly.
+        </div>
+
+        <div class="ds-layout">
+          <div class="ds-control-card">
+            <h4>Relay availability</h4>
+            <div class="control-description">
+              When port 8030 is down, this SDK keeps evaluating by walking the fallback path to LaunchDarkly.
+              Use SDK Access to Relay on the Relay Proxy Enterprise card.
+            </div>
+            <div class="ds-port-state">
+              <span id="ds-port-badge" class="ds-port-badge open"><span class="pip"></span>Port 8030 open</span>
+              <span id="ds-active-label" style="font-size: 12px; color: #555;">Active: —</span>
+            </div>
+          </div>
+
+          <div class="ds-chain">
+            <div class="ds-chain-label">Fallback path <span>what the SDK tries, in order</span></div>
+            <div class="ds-nodes" id="ds-path"></div>
+          </div>
+
+          <div class="ds-control-card">
+            <h4>Feature flag: user-message</h4>
+            <div class="control-description">Evaluations keep working after fallback.</div>
+            <div class="ds-flag-value" id="ds-flag-value">Loading…</div>
+          </div>
+
+          <div class="ds-control-card">
+            <h4>SDK log trail</h4>
+            <div class="ds-events" id="ds-events"><div class="empty">Waiting for SDK events…</div></div>
           </div>
         </div>
         </div><!-- /.panel-body -->
@@ -1609,18 +1667,36 @@
           </div>
         </div>
 
-        <!-- Connection Control Section -->
+        <!-- SDK Access to Relay -->
         <div class="connection-control-section">
-          <h4>Connection Control</h4>
+          <h4>SDK Access to Relay</h4>
+          <div class="connection-toggle">
+            <label class="toggle-switch">
+              <input type="checkbox" id="relay-port-toggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+            <span id="relay-port-toggle-label" class="toggle-label">Port available</span>
+          </div>
+          <div class="control-description">
+            Stops the Relay Proxy so port 8030 is unavailable to SDKs.
+            Node.js and the JavaScript Client fail. Data System Builder falls back to LaunchDarkly.
+          </div>
+        </div>
+        <div id="relay-port-error" class="error-message" style="display: none;"></div>
+
+        <!-- Relay Connection to LaunchDarkly -->
+        <div class="connection-control-section">
+          <h4>Relay Connection to LaunchDarkly</h4>
           <div class="connection-toggle">
             <label class="toggle-switch">
               <input type="checkbox" id="relay-proxy-toggle" checked>
               <span class="toggle-slider"></span>
             </label>
-            <span id="relay-proxy-toggle-label" class="toggle-label">Disconnect</span>
+            <span id="relay-proxy-toggle-label" class="toggle-label">Connected</span>
           </div>
           <div class="control-description">
-            Initiate disconnect or reconnect actions
+            Disconnects Relay from LaunchDarkly by stopping the outbound proxy.
+            Port 8030 stays available to SDKs; Relay serves cached flags.
           </div>
         </div>
         
@@ -1681,65 +1757,6 @@
           </div>
           <div id="redis-data-store" style="font-size: 12px; line-height: 1.6; color: #555; background-color: #f8f9fa; padding: 10px 10px 30px 10px; border-radius: 4px;">
             <div style="color: #999; font-style: italic;">Waiting for Redis to initialize...</div>
-          </div>
-        </div>
-        </div><!-- /.panel-body -->
-      </div>
-
-      <!-- Data System Builder -->
-      <div class="service-panel collapsed" id="data-system-panel">
-        <div class="service-header">
-          <div class="service-header-left">
-            <img src="launchdarkly-logo.svg" alt="LaunchDarkly" class="service-logo" />
-            <h2>Data System Builder</h2>
-          </div>
-          <div class="service-header-right">
-            <div class="status-indicator" id="data-system-status">
-              <span class="status-dot red dimmed" id="data-system-status-red"></span>
-              <span class="status-dot orange dimmed" id="data-system-status-orange"></span>
-              <span class="status-dot green dimmed" id="data-system-status-green"></span>
-            </div>
-            <button type="button" class="panel-collapse-toggle" aria-expanded="false" aria-label="Expand or collapse Data System Builder panel" title="Expand / collapse">▼</button>
-          </div>
-        </div>
-        <div class="panel-body">
-
-        <div class="ds-kicker">Python SDK · datasystem.custom()</div>
-        <div class="ds-subtitle">
-          Live fallback path: stream Relay first, then stream LaunchDarkly, then poll LaunchDarkly.
-        </div>
-
-        <div class="ds-layout">
-          <div class="ds-control-card">
-            <h4>Relay Proxy port 8030</h4>
-            <div class="control-description">
-              Stops the Relay Proxy. Node.js and the JavaScript Client fail.
-              This SDK keeps evaluating by walking the fallback path to LaunchDarkly.
-            </div>
-            <div class="ds-port-state">
-              <span id="ds-port-badge" class="ds-port-badge open"><span class="pip"></span>Port 8030 open</span>
-              <span id="ds-active-label" style="font-size: 12px; color: #555;">Active: —</span>
-            </div>
-            <button id="ds-relay-port-button" class="ds-kill-button kill" type="button">
-              Kill Relay Port
-            </button>
-            <div id="ds-port-message" class="control-description" style="margin-top: 8px;"></div>
-          </div>
-
-          <div class="ds-chain">
-            <div class="ds-chain-label">Fallback path <span>what the SDK tries, in order</span></div>
-            <div class="ds-nodes" id="ds-path"></div>
-          </div>
-
-          <div class="ds-control-card">
-            <h4>Feature flag: user-message</h4>
-            <div class="control-description">Evaluations keep working after fallback.</div>
-            <div class="ds-flag-value" id="ds-flag-value">Loading…</div>
-          </div>
-
-          <div class="ds-control-card">
-            <h4>SDK log trail</h4>
-            <div class="ds-events" id="ds-events"><div class="empty">Waiting for SDK events…</div></div>
           </div>
         </div>
         </div><!-- /.panel-body -->
@@ -2314,6 +2331,110 @@
         }
       }
       
+      hideError() {
+        if (this.errorDiv) {
+          this.errorDiv.style.display = 'none';
+        }
+      }
+    }
+
+    class RelayPortControl {
+      constructor() {
+        this.toggle = document.getElementById('relay-port-toggle');
+        this.toggleLabel = document.getElementById('relay-port-toggle-label');
+        this.errorDiv = document.getElementById('relay-port-error');
+        this.isUpdating = false;
+        this.pollingInterval = null;
+        this.lastOpen = null;
+
+        if (!this.toggle || !this.toggleLabel) {
+          console.error('[RelayPortControl] Toggle elements not found');
+          return;
+        }
+
+        this.init();
+      }
+
+      async init() {
+        await this.loadStatus();
+        this.toggle.addEventListener('change', (e) => this.handleToggle(e));
+        this.pollingInterval = setInterval(() => this.loadStatus(), 2000);
+      }
+
+      async loadStatus() {
+        try {
+          const response = await fetch('http://localhost:${API_SERVICE_PORT}/api/data-system/relay-port');
+          const data = await response.json();
+          const open = data.open !== false && data.state !== 'killed';
+          this.updateUI(open, data.error);
+        } catch (error) {
+          console.error('Failed to load Relay port status:', error);
+          this.showError('Failed to load Relay port status');
+        }
+      }
+
+      async handleToggle(event) {
+        if (this.isUpdating) {
+          event.preventDefault();
+          event.target.checked = !event.target.checked;
+          return;
+        }
+
+        this.isUpdating = true;
+        this.hideError();
+        this.toggle.disabled = true;
+
+        const shouldOpen = event.target.checked;
+        const endpoint = shouldOpen
+          ? '/api/data-system/relay-port/restore'
+          : '/api/data-system/relay-port/kill';
+
+        try {
+          this.toggleLabel.textContent = shouldOpen ? 'Restoring port…' : 'Stopping Relay…';
+          const response = await fetch(`http://localhost:${API_SERVICE_PORT}${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          const data = await response.json();
+          if (!data.success) {
+            throw new Error(data.error || 'Relay port action failed');
+          }
+          await this.loadStatus();
+        } catch (error) {
+          console.error('Relay port toggle failed:', error);
+          this.showError(error.message);
+          event.target.checked = !shouldOpen;
+          this.updateUI(!shouldOpen);
+        } finally {
+          this.isUpdating = false;
+          this.toggle.disabled = false;
+          await this.loadStatus();
+        }
+      }
+
+      updateUI(open, error) {
+        if (!this.toggle || !this.toggleLabel) return;
+        if (this.lastOpen !== open) {
+          this.lastOpen = open;
+        }
+        if (!this.isUpdating) {
+          this.toggle.checked = open;
+          this.toggleLabel.textContent = open ? 'Port available' : 'Port unavailable';
+        }
+        if (error && !open) {
+          this.showError(error);
+        } else if (open) {
+          this.hideError();
+        }
+      }
+
+      showError(message) {
+        if (this.errorDiv) {
+          this.errorDiv.textContent = message;
+          this.errorDiv.style.display = 'block';
+        }
+      }
+
       hideError() {
         if (this.errorDiv) {
           this.errorDiv.style.display = 'none';
@@ -3576,7 +3697,6 @@
           </div>
           <div class="service-header-right">
             <button id="node-start-button" class="control-icon-button start" title="Start Node.js Service">▶</button>
-            <button id="node-stop-button" class="control-icon-button stop" title="Stop Node.js Service">■</button>
             <button id="node-restart-button" class="control-icon-button restart" title="Restart Node.js Service">↻</button>
             <div class="status-indicator" id="node-status">
               <span class="status-dot red dimmed" id="node-status-red"></span>
@@ -3682,7 +3802,6 @@
           </div>
           <div class="service-header-right">
             <button id="python-start-button" class="control-icon-button start" title="Start Python Service">▶</button>
-            <button id="python-stop-button" class="control-icon-button stop" title="Stop Python Service">■</button>
             <button id="python-restart-button" class="control-icon-button restart" title="Restart Python Service">↻</button>
             <div class="status-indicator" id="python-status">
               <span class="status-dot red dimmed" id="python-status-red"></span>
@@ -4424,6 +4543,79 @@
             console.error('[JavaScript Client] SDK error event fired:', error);
             updatePillStatus('javascript', 'disconnected');
           });
+
+          const jsClientSdkOptions = {
+            baseUrl: 'http://localhost:8030',
+            streamUrl: 'http://localhost:8030',
+            eventsUrl: 'http://localhost:8030',
+            streaming: true,
+            sendEvents: false,
+            diagnosticOptOut: true,
+            evaluationReasons: true
+          };
+
+          window.refreshJavaScriptClient = async function refreshJavaScriptClient() {
+            const refreshButton = document.getElementById('javascript-refresh-button');
+            const clientSideId = document.querySelector('meta[name="ld-client-id"]')?.content;
+            if (!clientSideId) {
+              throw new Error('LaunchDarkly client-side ID not found');
+            }
+
+            const context = (window.jsClientSDK && typeof window.jsClientSDK.getContext === 'function' && window.jsClientSDK.getContext())
+              || (javascriptClientPanel && javascriptClientPanel.currentContext)
+              || {
+                kind: 'user',
+                key: `javascript-anon-${Math.random().toString(36).substring(7)}`,
+                anonymous: true
+              };
+
+            if (refreshButton) {
+              refreshButton.disabled = true;
+            }
+            updatePillStatus('javascript', 'degraded');
+            console.log('[JavaScript Client] Refreshing SDK connection to Relay Proxy');
+
+            try {
+              if (window.jsClientSDK && typeof window.jsClientSDK.close === 'function') {
+                window.jsClientSDK.close();
+              }
+            } catch (closeError) {
+              console.warn('[JavaScript Client] Error closing SDK before refresh:', closeError);
+            }
+
+            window.jsClientSDK = window.LDClient.initialize(clientSideId, context, jsClientSdkOptions);
+            window.jsClientSDK.on('ready', () => {
+              console.log('[JavaScript Client] SDK ready after refresh');
+              updatePillStatus('javascript', 'connected');
+              updateJavaScriptClientPanel(true);
+            });
+            window.jsClientSDK.on('change', () => {
+              updateJavaScriptClientPanel(true);
+            });
+            window.jsClientSDK.on('error', (error) => {
+              console.error('[JavaScript Client] SDK error after refresh:', error);
+              updatePillStatus('javascript', 'disconnected');
+            });
+
+            try {
+              await window.jsClientSDK.waitForInitialization(5);
+              window.jsClientOfflineMode = false;
+              if (javascriptClientPanel) {
+                javascriptClientPanel.initialize();
+              }
+              updatePillStatus('javascript', 'connected');
+              updateJavaScriptClientPanel(true);
+            } catch (error) {
+              console.error('[JavaScript Client] Refresh initialization failed:', error);
+              updatePillStatus('javascript', 'disconnected');
+              updateJavaScriptClientPanel(false);
+              throw error;
+            } finally {
+              if (refreshButton) {
+                refreshButton.disabled = false;
+              }
+            }
+          };
           
           // Add periodic check for reconnection (fallback mechanism)
           // Check every 2 seconds if we're in offline mode and SDK is now ready
@@ -4673,6 +4865,21 @@
       
       // Initialize with current SDK context
       javascriptClientPanel.initialize();
+
+      const javascriptRefreshButton = document.getElementById('javascript-refresh-button');
+      if (javascriptRefreshButton) {
+        javascriptRefreshButton.addEventListener('click', async () => {
+          try {
+            if (typeof window.refreshJavaScriptClient === 'function') {
+              await window.refreshJavaScriptClient();
+            } else {
+              alert('JavaScript Client SDK is not initialized');
+            }
+          } catch (error) {
+            alert(`Failed to refresh JavaScript Client: ${error.message}`);
+          }
+        });
+      }
       
       // Fetch panel configuration and initialize Panel 1 dynamically
       const panelService = await fetchPanelConfiguration();
@@ -6427,6 +6634,7 @@
       
       // Initialize relay proxy connection control
       const relayProxyConnectionControl = new RelayProxyConnectionControl();
+      const relayPortControl = new RelayPortControl();
       
       // Set up context button handlers
       const nodeContextButton = document.getElementById('node-context-button');
@@ -7259,9 +7467,6 @@
       const flagEl = document.getElementById('ds-flag-value');
       const badgeEl = document.getElementById('ds-port-badge');
       const activeEl = document.getElementById('ds-active-label');
-      const messageEl = document.getElementById('ds-port-message');
-      const buttonEl = document.getElementById('ds-relay-port-button');
-      let busy = false;
 
       function renderNodes(container, nodes) {
         if (!container) return;
@@ -7299,11 +7504,7 @@
       function setPortUi(open) {
         if (badgeEl) {
           badgeEl.className = `ds-port-badge ${open ? 'open' : 'killed'}`;
-          badgeEl.innerHTML = `<span class="pip"></span>${open ? 'Port 8030 open' : 'Port 8030 killed'}`;
-        }
-        if (buttonEl && !busy) {
-          buttonEl.className = `ds-kill-button ${open ? 'kill' : 'restore'}`;
-          buttonEl.textContent = open ? 'Kill Relay Port' : 'Restore Relay Port';
+          badgeEl.innerHTML = `<span class="pip"></span>${open ? 'Port 8030 open' : 'Port 8030 unavailable'}`;
         }
       }
 
@@ -7342,9 +7543,6 @@
               : '';
             activeEl.textContent = `Active: ${data.activeSource && data.activeSource.label ? data.activeSource.label : '—'}${state}`;
           }
-          if (messageEl && data.initializationError && !busy) {
-            messageEl.textContent = data.initializationError;
-          }
           if (data.sdkInitialized) {
             updatePillStatus('data-system', open ? 'connected' : 'degraded');
           } else {
@@ -7356,39 +7554,33 @@
         }
       }
 
-      if (buttonEl) {
-        buttonEl.addEventListener('click', async () => {
-          const restoring = buttonEl.classList.contains('restore');
-          busy = true;
-          buttonEl.disabled = true;
-            buttonEl.textContent = restoring ? 'Restoring Relay…' : 'Stopping Relay…';
-            if (messageEl) {
-              messageEl.textContent = restoring
-                ? 'Bringing Relay Proxy back. Node.js and JavaScript Client should recover; this SDK can prefer Relay again.'
-                : 'Stopping Relay Proxy. Watch Node.js and JavaScript Client fail while this SDK falls back to LaunchDarkly.';
-            }
+      refresh();
+      setInterval(refresh, 2000);
+
+      const refreshButton = document.getElementById('data-system-refresh-button');
+      if (refreshButton) {
+        refreshButton.addEventListener('click', async () => {
+          refreshButton.disabled = true;
+          const originalText = refreshButton.textContent;
+          refreshButton.textContent = '...';
+          updatePillStatus('data-system', 'degraded');
           try {
-            const endpoint = restoring
-              ? '/api/data-system/relay-port/restore'
-              : '/api/data-system/relay-port/kill';
-            const response = await fetch(`${apiBase}${endpoint}`, { method: 'POST' });
+            const response = await fetch(`${apiBase}/api/data-system/restart`, { method: 'POST' });
             const data = await response.json();
             if (!data.success) {
-              alert(data.error || 'Relay port action failed');
+              throw new Error(data.error || 'Restart failed');
             }
+            await new Promise((resolve) => setTimeout(resolve, 2500));
             await refresh();
           } catch (error) {
-            alert(`Relay port action failed: ${error.message}`);
+            alert(`Failed to refresh Data System Builder: ${error.message}`);
+            updatePillStatus('data-system', 'disconnected');
           } finally {
-            busy = false;
-            buttonEl.disabled = false;
-            await refresh();
+            refreshButton.disabled = false;
+            refreshButton.textContent = originalText;
           }
         });
       }
-
-      refresh();
-      setInterval(refresh, 2000);
     }
   </script>
 </body>
