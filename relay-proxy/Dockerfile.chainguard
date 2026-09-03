@@ -4,7 +4,7 @@
 # https://github.com/launchdarkly/ld-relay/blob/v8/Dockerfile
 # https://images.chainguard.dev/directory/image/go-fips/overview
 
-ARG LD_RELAY_VERSION=8.16.4
+ARG LD_RELAY_VERSION=9.0.0-rc.5
 ARG CHAINGUARD_ORG
 
 FROM cgr.dev/${CHAINGUARD_ORG}/go-fips:latest AS builder
