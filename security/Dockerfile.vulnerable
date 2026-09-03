@@ -1,0 +1,36 @@
+# Intentionally vulnerable test image for CVE-2023-24329.
+# Not used by the main Relay Proxy demo. Do not promote this tag.
+#
+# Base digest is the multi-arch index for debian:bullseye-20230522-slim.
+FROM debian:bullseye-20230522-slim@sha256:7606bef5684b393434f06a50a3d1a09808fee5a0240d37da5d181b1b121e7637
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Historical snapshot before Debian patched python3.9 for CVE-2023-24329.
+ARG DEBIAN_SNAPSHOT=20230502T000000Z
+ARG PYTHON39=3.9.2-1
+
+RUN printf '%s\n' \
+      'Acquire::Check-Valid-Until "false";' \
+      'Acquire::Retries "5";' \
+    > /etc/apt/apt.conf.d/99snapshot \
+ && printf '%s\n' \
+      "deb http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} bullseye main" \
+    > /etc/apt/sources.list \
+ && rm -f /etc/apt/sources.list.d/* \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      python3.9=${PYTHON39} \
+      python3.9-minimal=${PYTHON39} \
+      libpython3.9-stdlib=${PYTHON39} \
+      libpython3.9-minimal=${PYTHON39} \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY test-fixture/ /opt/test-fixture/
+RUN chmod 0755 /opt/test-fixture/run.sh \
+ && useradd --system --no-create-home --uid 65532 cveuser \
+ && chown -R cveuser:cveuser /opt/test-fixture
+
+USER 65532:65532
+WORKDIR /opt/test-fixture
+ENTRYPOINT ["/opt/test-fixture/run.sh"]

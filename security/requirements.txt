@@ -1,0 +1,11 @@
+# Language lockfile for the CVE reproduction images.
+#
+# The runtime fixture uses CPython stdlib urllib.parse only. No third-party
+# wheels are installed, so a hashed requirements file would be empty and
+# would not constrain the interpreter that carries CVE-2023-24329.
+#
+# Python itself is pinned by Debian package version in the Dockerfiles:
+#   vulnerable: python3.9=3.9.2-1
+#   fixed:      python3.9=3.9.2-1+deb11u2
+#
+# Rebuilds must keep those apt pins. Do not add unpinned pip packages.

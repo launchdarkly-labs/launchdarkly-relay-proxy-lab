@@ -145,6 +145,17 @@ The Squid proxy service provides:
 
 **Port Mapping**: `${SQUID_PROXY_PORT}:3128` (external:internal)
 
+### Security Evidence Portal
+
+**Environment Variable**: `SECURITY_PORT`  
+**Default Value**: `8090`  
+**Purpose**: Isolated SBOM / CVE evidence UI  
+**Access**: `http://localhost:${SECURITY_PORT}`
+
+This portal is defined in `docker-compose-security.yml` only. It does not join `launchdarkly-network` and is not started by the main demo compose file.
+
+**Port Mapping**: `${SECURITY_PORT}:8090` (external:internal)
+
 ## Fixed Infrastructure Ports
 
 Two services use fixed ports that cannot be changed via environment variables:

@@ -130,6 +130,10 @@ PBT-TESTING.md
 src/nodejs/tests/
 src/php/tests/
 
+# Isolated CVE demo scan artifacts (regenerate with ./security/reproduce-cve.sh)
+security/results/*
+!security/results/README.md
+
 # Temporary work/documentation files
 *_FIX.md
 *_FEATURE.md

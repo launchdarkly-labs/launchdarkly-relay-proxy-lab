@@ -1,0 +1,28 @@
+# Isolated SBOM / CVE evidence portal.
+# Does not join the LaunchDarkly demo network and does not replace any
+# production or demo service images.
+#
+#   ./security/reproduce-cve.sh
+#   docker compose -f docker-compose-security.yml up -d --build
+#
+# Portal: http://localhost:${SECURITY_PORT:-8090}
+
+name: ld-security-evidence
+
+services:
+  security-portal:
+    container_name: security-portal
+    build:
+      context: ./security
+      dockerfile: Dockerfile.portal
+    ports:
+      - "${SECURITY_PORT:-8090}:8090"
+    volumes:
+      - ./security/results:/artifacts:ro
+    networks:
+      - security-evidence
+    restart: unless-stopped
+
+networks:
+  security-evidence:
+    driver: bridge

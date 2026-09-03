@@ -147,6 +147,16 @@ docker compose -f docker-compose.yml -f docker-compose-fips.yml up -d --build
 docker compose -f docker-compose.yml -f docker-compose-chainguard.yml up -d --build
 ```
 
+**Optional — SBOM / CVE evidence portal** (separate compose file, does not change demo images):
+
+```bash
+./security/reproduce-cve.sh
+docker compose -f docker-compose-security.yml up -d --build
+# http://localhost:8090
+```
+
+See [security/README.md](security/README.md).
+
 ### 4. Changing Configuration
 
 After modifying `.env` file:

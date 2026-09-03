@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Exhibit S-29 · CVE evidence locker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo+Narrow:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --paper: #efe4cc;
+      --paper-2: #f6edd8;
+      --ink: #1c1612;
+      --muted: #5e5348;
+      --rule: #c9b89a;
+      --red: #9f1d1d;
+      --green: #1e5c3f;
+      --amber: #8a5a12;
+      --shadow: 0 18px 40px rgba(40, 24, 8, 0.18);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background:
+        radial-gradient(1200px 500px at 10% -10%, rgba(159, 29, 29, 0.08), transparent 50%),
+        repeating-linear-gradient(90deg, transparent 0 31px, rgba(28, 22, 18, 0.03) 31px 32px),
+        var(--paper);
+      color: var(--ink);
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .frame {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 36px 22px 80px;
+    }
+    header.mast {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: end;
+      border-bottom: 3px solid var(--ink);
+      padding-bottom: 18px;
+      margin-bottom: 28px;
+    }
+    .kicker {
+      font-family: "Archivo Narrow", sans-serif;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      font-size: 12px;
+      color: var(--red);
+    }
+    h1 {
+      font-family: "Instrument Serif", serif;
+      font-size: clamp(2.4rem, 6vw, 4.4rem);
+      font-weight: 400;
+      line-height: 0.95;
+      margin: 8px 0 10px;
+    }
+    .lede { color: var(--muted); max-width: 62ch; }
+    .stamp {
+      border: 3px solid var(--red);
+      color: var(--red);
+      padding: 10px 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      font-family: "Archivo Narrow", sans-serif;
+      font-weight: 700;
+      transform: rotate(8deg);
+      background: rgba(159, 29, 29, 0.06);
+    }
+    .stamp.ok {
+      border-color: var(--green);
+      color: var(--green);
+      background: rgba(30, 92, 63, 0.08);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 22px;
+    }
+    @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+    aside, section.card {
+      background: var(--paper-2);
+      border: 1px solid var(--rule);
+      box-shadow: var(--shadow);
+    }
+    aside { padding: 18px; height: fit-content; }
+    aside h2, .card h2 {
+      font-family: "Archivo Narrow", sans-serif;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-size: 13px;
+      margin: 0 0 12px;
+    }
+    .index a {
+      display: block;
+      color: var(--ink);
+      text-decoration: none;
+      padding: 7px 0;
+      border-bottom: 1px dashed var(--rule);
+    }
+    .index a:hover { color: var(--red); }
+    .card { padding: 20px 22px; margin-bottom: 22px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--rule);
+      vertical-align: top;
+    }
+    th { font-family: "Archivo Narrow", sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border: 1px solid currentColor;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .bad { color: var(--red); }
+    .good { color: var(--green); }
+    .warn { color: var(--amber); }
+    pre {
+      background: #1c1612;
+      color: #f3e6c8;
+      padding: 14px;
+      overflow: auto;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+    .downloads { display: flex; flex-wrap: wrap; gap: 8px; }
+    .downloads a {
+      color: var(--ink);
+      border: 1px solid var(--ink);
+      padding: 8px 10px;
+      text-decoration: none;
+      background: #fff8ea;
+    }
+    .downloads a:hover { background: var(--ink); color: var(--paper); }
+    .empty {
+      padding: 28px;
+      border: 2px dashed var(--rule);
+      background: rgba(255,255,255,0.35);
+    }
+    .meta { color: var(--muted); font-size: 12px; }
+    .layers { display: grid; gap: 8px; }
+    .layer {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 10px;
+      align-items: start;
+    }
+    .n {
+      font-family: "Archivo Narrow", sans-serif;
+      font-weight: 700;
+      border: 1px solid var(--ink);
+      width: 24px; height: 24px;
+      display: grid; place-items: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <header class="mast">
+      <div>
+        <div class="kicker">Security evidence locker · not the product demo</div>
+        <h1>Exhibit S-29</h1>
+        <p class="lede">Side-by-side SBOM, CVE inventory, and a safe urllib.parse regression for CVE-2023-24329. Isolated test images only — the Relay Proxy stack is untouched.</p>
+      </div>
+      <div id="stamp" class="stamp">Awaiting scan</div>
+    </header>
+
+    <div class="grid">
+      <aside>
+        <h2>Exhibit index</h2>
+        <nav class="index">
+          <a href="#matrix">01 Comparison matrix</a>
+          <a href="#layers">02 Evidence layers</a>
+          <a href="#runtime">03 Runtime fixture</a>
+          <a href="#artifacts">04 Download artifacts</a>
+          <a href="#qualify">05 Qualification</a>
+        </nav>
+        <p class="meta" id="generated">No summary.json yet.</p>
+      </aside>
+
+      <div>
+        <section class="card" id="status"></section>
+        <section class="card" id="matrix">
+          <h2>Comparison matrix</h2>
+          <div id="matrix-body"></div>
+        </section>
+        <section class="card" id="layers">
+          <h2>Evidence layers</h2>
+          <div class="layers">
+            <div class="layer"><div class="n">1</div><div><strong>Inventory.</strong> The package exists in the CycloneDX SBOM.</div></div>
+            <div class="layer"><div class="n">2</div><div><strong>Version match.</strong> Installed python3.9 falls in the affected range.</div></div>
+            <div class="layer"><div class="n">3</div><div><strong>Reachability.</strong> The fixture imports and calls urllib.parse.urlsplit.</div></div>
+            <div class="layer"><div class="n">4</div><div><strong>Behavior.</strong> The same regression input is accepted on the vulnerable image and rejected on the patched image.</div></div>
+            <div class="layer"><div class="n">5</div><div><strong>Exploitability.</strong> Not demonstrated. No remote payload, shell, or host mutation.</div></div>
+          </div>
+        </section>
+        <section class="card" id="runtime">
+          <h2>Runtime fixture</h2>
+          <div id="runtime-body"></div>
+        </section>
+        <section class="card" id="artifacts">
+          <h2>Artifacts</h2>
+          <div class="downloads" id="downloads"></div>
+        </section>
+        <section class="card" id="qualify">
+          <h2>Qualification</h2>
+          <p>A CVE scanner finding is not the same as confirmed exploitability. Package metadata can false-positive, and a vulnerable library may be unused. This locker stops at layers 1–4, which is the appropriate bar for engineering, sales-engineering, and audit walkthroughs.</p>
+        </section>
+      </div>
+    </div>
+  </div>
+  <script>
+    const artifactLinks = [
+      ["summary.json", "Summary"],
+      ["sbom.cdx.json", "SBOM (vulnerable)"],
+      ["sbom-fixed.cdx.json", "SBOM (fixed)"],
+      ["trivy.json", "Trivy (vulnerable)"],
+      ["fixed.json", "Trivy (fixed)"],
+      ["metadata.txt", "Scanner metadata"],
+      ["image-digest.txt", "Image IDs"]
+    ];
+
+    function pill(ok, yes, no) {
+      return `<span class="pill ${ok ? "good" : "bad"}">${ok ? yes : no}</span>`;
+    }
+
+    function counts(obj) {
+      if (!obj) return "—";
+      return Object.entries(obj).map(([k, v]) => `${k}:${v}`).join(" · ");
+    }
+
+    function emptyState() {
+      document.getElementById("status").innerHTML = `
+        <div class="empty">
+          <h2>No evidence pack yet</h2>
+          <p>Generate artifacts, then refresh this page.</p>
+          <pre>./security/reproduce-cve.sh
+docker compose -f docker-compose-security.yml up -d --build</pre>
+        </div>`;
+      document.getElementById("matrix-body").innerHTML = "<p class='meta'>Matrix appears after a successful reproduce run.</p>";
+      document.getElementById("downloads").innerHTML = artifactLinks.map(([file, label]) =>
+        `<a href="/artifacts/${file}">${label}</a>`).join("");
+    }
+
+    function render(data) {
+      const stamp = document.getElementById("stamp");
+      const ready = data.vulnerable?.cvePresent && data.fixed?.runtime?.result === "fixed";
+      stamp.textContent = ready ? "Evidence sealed" : "Incomplete";
+      stamp.className = "stamp" + (ready ? " ok" : "");
+      document.getElementById("generated").textContent =
+        `Generated ${data.generatedAt || "unknown"} · ${data.cve}`;
+
+      document.getElementById("status").innerHTML = `
+        <h2>${data.cve}</h2>
+        <p>${data.title}</p>
+        <p class="meta">${data.package} · ${data.component} · ${data.severity || ""} · ${data.cvss || "CVSS vector recorded after scan"}</p>
+        <p><a href="${data.primaryUrl}" target="_blank" rel="noreferrer">Advisory</a></p>
+      `;
+
+      document.getElementById("matrix-body").innerHTML = `
+        <table>
+          <thead>
+            <tr><th>Artifact</th><th>Package state</th><th>Scanner</th><th>Runtime</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Vulnerable image<br><span class="meta">${data.vulnerable.tag}</span></td>
+              <td>${data.package} ${data.vulnerable.packageVersion}</td>
+              <td>${pill(data.vulnerable.cvePresent, "CVE present", "CVE missing")}<br><span class="meta">${counts(data.vulnerable.severityCounts)}</span></td>
+              <td class="bad">${data.vulnerable.runtime.result}: affected parser accepts the fixture</td>
+            </tr>
+            <tr>
+              <td>Fixed image<br><span class="meta">${data.fixed.tag}</span></td>
+              <td>${data.package} ${data.fixed.packageVersion}</td>
+              <td>${pill(!data.fixed.cvePresent, "CVE absent", "CVE still reported")}<br><span class="meta">${counts(data.fixed.severityCounts)}</span></td>
+              <td class="good">${data.fixed.runtime.result}: regression fixture rejected safely</td>
+            </tr>
+            <tr>
+              <td>Production candidate</td>
+              <td colspan="3">Relay release digest is out of scope here. Scan the demo Relay image separately; do not retag these test images into the product stack.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="meta">Image ID (vulnerable): ${data.vulnerable.image?.ImageID || "local unpushed image"}</p>
+        <p class="meta">User ${data.runtimeExposure.user} · ${data.runtimeExposure.network} · ports ${data.runtimeExposure.publishedPorts}</p>
+        <pre>${data.commands.reproduce}
+${data.commands.vulnerableRun}
+${data.commands.fixedRun}</pre>
+      `;
+
+      document.getElementById("runtime-body").innerHTML = `
+        <p>Vulnerable log</p>
+        <pre>${data.vulnerable.runtime.logExcerpt || ""}</pre>
+        <p>Fixed log</p>
+        <pre>${data.fixed.runtime.logExcerpt || ""}</pre>
+      `;
+
+      document.getElementById("downloads").innerHTML = (data.artifacts || artifactLinks.map(x => x[0])).map(file =>
+        `<a href="/artifacts/${file}">${file}</a>`).join("");
+    }
+
+    fetch("/artifacts/summary.json", { cache: "no-store" })
+      .then(r => { if (!r.ok) throw new Error("missing"); return r.json(); })
+      .then(render)
+      .catch(emptyState);
+  </script>
+</body>
+</html>
