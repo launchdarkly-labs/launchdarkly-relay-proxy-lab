@@ -9,4 +9,4 @@ services:
       context: ./relay-proxy
       dockerfile: Dockerfile.fips
       args:
-        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-8.16.4}
+        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-9.0.0-rc.5}

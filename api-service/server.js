@@ -1710,6 +1710,25 @@ app.post('/api/data-system/relay-port/restore', async (req, res) => {
   }
 });
 
+app.post('/api/data-system/restart', async (req, res) => {
+  try {
+    const { stdout } = await execPromise('docker restart data-system-app');
+    res.json({
+      success: true,
+      message: 'Data System Builder container restarted successfully',
+      container: stdout.trim()
+    });
+  } catch (error) {
+    logError('/api/data-system/restart', error, {
+      command: 'docker restart data-system-app'
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Feature flag evaluation endpoint for dashboard panel selection
 // Initialize LaunchDarkly SDK client for flag evaluation
 let dashboardFlagClient = null;
