@@ -21,6 +21,11 @@
       overflow: auto;
     }
 
+    body.layout-resizing {
+      cursor: col-resize;
+      user-select: none;
+    }
+
     .dashboard-container {
       width: 100%;
       min-height: 100vh;
@@ -30,14 +35,14 @@
     }
 
     .services-section {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(300px, 28%);
-      gap: 10px;
+      display: flex;
+      align-items: start;
+      gap: 0;
+      --main-left-percent: 72;
       padding: 8px;
       background-color: #f5f5f5;
       flex: 1;
       min-height: 100vh;
-      align-items: start;
       box-sizing: border-box;
     }
 
@@ -45,14 +50,51 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
-      min-width: 0;
+      width: calc(var(--main-left-percent) * 1%);
+      min-width: 280px;
+      flex-shrink: 0;
     }
 
     .services-right {
       position: sticky;
       top: 8px;
       align-self: start;
-      min-width: 0;
+      flex: 1;
+      min-width: 280px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .layout-resizer {
+      flex-shrink: 0;
+      width: 12px;
+      margin: 0 -2px;
+      cursor: col-resize;
+      align-self: stretch;
+      min-height: 120px;
+      position: relative;
+      z-index: 15;
+      touch-action: none;
+    }
+
+    .layout-resizer::after {
+      content: '';
+      position: absolute;
+      top: 8px;
+      bottom: 8px;
+      left: 50%;
+      width: 4px;
+      transform: translateX(-50%);
+      border-radius: 4px;
+      background: #d8d8d8;
+      transition: background 0.15s ease;
+    }
+
+    .layout-resizer:hover::after,
+    .layout-resizer:active::after,
+    body.layout-resizing .layout-resizer::after {
+      background: #405BFF;
     }
 
     .service-panel {
@@ -65,6 +107,7 @@
       display: flex;
       flex-direction: column;
       min-height: 0;
+      overflow: visible;
     }
 
     .service-panel.collapsed {
@@ -110,13 +153,25 @@
     }
 
     @media (max-width: 960px) {
+      .layout-resizer {
+        display: none;
+      }
+
       .services-section {
-        grid-template-columns: 1fr;
+        flex-direction: column;
         padding: 8px;
+        min-height: 100vh;
+      }
+
+      .services-left {
+        width: 100% !important;
+        min-width: 0;
       }
 
       .services-right {
         position: static;
+        width: 100%;
+        min-width: 0;
       }
     }
     
@@ -657,7 +712,7 @@
     }
 
     #data-system-panel {
-      min-width: 640px;
+      min-width: 0;
     }
 
     .ds-layout {
@@ -1215,8 +1270,8 @@
 
   <div class="dashboard-container">
     <!-- Services Section (Top 60%) -->
-    <div class="services-section">
-      <div class="services-left">
+    <div class="services-section" id="services-section">
+      <div class="services-left" id="services-left">
         <!-- Node.js Service Panel -->
         <div class="service-panel collapsed" id="node-service-panel">
         <div class="service-header">
@@ -1490,50 +1545,18 @@
         </div><!-- /.panel-body -->
       </div>
 
-      <!-- Redis Panel -->
-      <div class="service-panel collapsed" id="redis-panel">
-        <div class="service-header">
-          <div class="service-header-left">
-            <img src="Redis_logo.svg.png" alt="Redis" class="service-logo" />
-            <h2>Redis</h2>
-          </div>
-          <div class="service-header-right">
-            <button id="redis-start-button" class="control-icon-button start" title="Start Redis">▶</button>
-            <button id="redis-stop-button" class="control-icon-button stop" title="Stop Redis">■</button>
-            <button id="redis-restart-button" class="control-icon-button restart" title="Restart Redis">↻</button>
-            <div class="status-indicator" id="redis-status">
-              <span class="status-dot red dimmed" id="redis-status-red"></span>
-              <span class="status-dot orange dimmed" id="redis-status-orange"></span>
-              <span class="status-dot green dimmed" id="redis-status-green"></span>
-            </div>
-            <button type="button" class="panel-collapse-toggle" aria-expanded="false" aria-label="Expand or collapse Redis panel" title="Expand / collapse">▼</button>
-          </div>
-        </div>
-        <div class="panel-body">
-        
-        <div style="margin-bottom: 20px;">
-          <div style="font-size: 14px; color: #666; margin-bottom: 10px;">
-            <strong>Status:</strong> <span id="redis-status-text">Checking...</span>
-          </div>
-          <div style="font-size: 14px; color: #666;">
-            <strong>Port:</strong> 6379
-          </div>
-        </div>
-        
-        <div class="sdk-cache-display" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
-          <h4 style="font-size: 14px; color: #333; margin-bottom: 10px;">Redis Data Store</h4>
-          <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
-            Raw flag configurations stored in Redis
-          </div>
-          <div id="redis-data-store" style="font-size: 12px; line-height: 1.6; color: #555; background-color: #f8f9fa; padding: 10px 10px 30px 10px; border-radius: 4px;">
-            <div style="color: #999; font-style: italic;">Waiting for Redis to initialize...</div>
-          </div>
-        </div>
-        </div><!-- /.panel-body -->
-      </div>
       </div><!-- /.services-left -->
 
-      <div class="services-right">
+      <div
+        class="layout-resizer layout-resizer--main"
+        id="main-layout-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize SDK and infrastructure columns"
+        title="Drag to resize columns"
+      ></div>
+
+      <div class="services-right" id="services-right">
       <!-- Relay Proxy Enterprise Panel -->
       <div class="service-panel" id="relay-proxy-panel">
         <div class="service-header">
@@ -1622,7 +1645,7 @@
       </div>
 
       <!-- Redis Panel -->
-      <div class="service-panel" id="redis-panel">
+      <div class="service-panel collapsed" id="redis-panel">
         <div class="service-header">
           <div class="service-header-left">
             <img src="Redis_logo.svg.png" alt="Redis" class="service-logo" />
@@ -1637,9 +1660,11 @@
               <span class="status-dot orange dimmed" id="redis-status-orange"></span>
               <span class="status-dot green dimmed" id="redis-status-green"></span>
             </div>
+            <button type="button" class="panel-collapse-toggle" aria-expanded="false" aria-label="Expand or collapse Redis panel" title="Expand / collapse">▼</button>
           </div>
         </div>
-        
+        <div class="panel-body">
+
         <div style="margin-bottom: 20px;">
           <div style="font-size: 14px; color: #666; margin-bottom: 10px;">
             <strong>Status:</strong> <span id="redis-status-text">Checking...</span>
@@ -1658,10 +1683,11 @@
             <div style="color: #999; font-style: italic;">Waiting for Redis to initialize...</div>
           </div>
         </div>
+        </div><!-- /.panel-body -->
       </div>
 
       <!-- Data System Builder -->
-      <div class="service-panel" id="data-system-panel">
+      <div class="service-panel collapsed" id="data-system-panel">
         <div class="service-header">
           <div class="service-header-left">
             <img src="launchdarkly-logo.svg" alt="LaunchDarkly" class="service-logo" />
@@ -1673,8 +1699,10 @@
               <span class="status-dot orange dimmed" id="data-system-status-orange"></span>
               <span class="status-dot green dimmed" id="data-system-status-green"></span>
             </div>
+            <button type="button" class="panel-collapse-toggle" aria-expanded="false" aria-label="Expand or collapse Data System Builder panel" title="Expand / collapse">▼</button>
           </div>
         </div>
+        <div class="panel-body">
 
         <div class="ds-kicker">Python SDK · datasystem.custom()</div>
         <div class="ds-subtitle">
@@ -1714,8 +1742,10 @@
             <div class="ds-events" id="ds-events"><div class="empty">Waiting for SDK events…</div></div>
           </div>
         </div>
+        </div><!-- /.panel-body -->
       </div>
-    </div>
+      </div><!-- /.services-right -->
+    </div><!-- /.services-section -->
 
   </div>
 
@@ -4662,7 +4692,8 @@
           'javascript-service-panel': true,
           'php-service-panel': true,
           'redis-panel': true,
-          'relay-proxy-panel': false
+          'relay-proxy-panel': false,
+          'data-system-panel': false
         };
         
         let saved = {};
@@ -4705,6 +4736,76 @@
               persist();
             });
           }
+        });
+      })();
+
+      // Adjustable column layout with drag handles
+      (function initLayoutResize() {
+        const STORAGE_KEY = 'dashboard-layout-sizes';
+        const defaults = {
+          mainLeftPercent: 72
+        };
+
+        const section = document.getElementById('services-section');
+        const mainResizer = document.getElementById('main-layout-resizer');
+
+        if (!section) {
+          return;
+        }
+
+        let saved = {};
+        try {
+          saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') || {};
+        } catch (e) {
+          saved = {};
+        }
+
+        function clamp(value, min, max) {
+          return Math.min(max, Math.max(min, value));
+        }
+
+        function persist() {
+          const state = {
+            mainLeftPercent: Number(section.style.getPropertyValue('--main-left-percent') || defaults.mainLeftPercent)
+          };
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          } catch (e) { /* ignore */ }
+        }
+
+        function setMainSplit(percent) {
+          const value = clamp(Math.round(percent), 35, 85);
+          section.style.setProperty('--main-left-percent', value);
+        }
+
+        setMainSplit(
+          Object.prototype.hasOwnProperty.call(saved, 'mainLeftPercent')
+            ? saved.mainLeftPercent
+            : defaults.mainLeftPercent
+        );
+
+        if (!mainResizer) {
+          return;
+        }
+
+        mainResizer.addEventListener('mousedown', (event) => {
+          event.preventDefault();
+
+          const onMouseMove = (moveEvent) => {
+            const rect = section.getBoundingClientRect();
+            const percent = ((moveEvent.clientX - rect.left) / rect.width) * 100;
+            setMainSplit(percent);
+          };
+          const onMouseUp = () => {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            document.body.classList.remove('layout-resizing');
+            persist();
+          };
+
+          document.body.classList.add('layout-resizing');
+          document.addEventListener('mousemove', onMouseMove);
+          document.addEventListener('mouseup', onMouseUp);
         });
       })();
       
