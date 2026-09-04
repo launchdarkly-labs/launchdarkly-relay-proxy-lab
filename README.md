@@ -147,6 +147,10 @@ docker compose -f docker-compose.yml -f docker-compose-fips.yml up -d --build
 # Chainguard go-fips — OpenSSL-backed FIPS (relay-proxy/Dockerfile.chainguard)
 # Needs a commercial Chainguard license; see "Chainguard build" below.
 docker compose -f docker-compose.yml -f docker-compose-chainguard.yml up -d --build
+
+# CNSA 2.0 posture: adds ML-DSA-87 signatures, trades the CMVP certificate
+# Needs Go 1.27 and the in-process FIPS module; see "CNSA 2.0 posture" below.
+docker compose -f docker-compose.yml -f docker-compose-cnsa.yml up -d --build
 ```
 
 Both hardened builds compile the relay from the upstream `LD_RELAY_VERSION` release tarball
@@ -201,6 +205,95 @@ docker compose -f docker-compose.yml -f docker-compose-fips.yml build \
 The build log reports which module resolved and how it was classified. Validation status is
 derived from the toolchain's own alias files, not passed in, so the label cannot claim a
 status the linked module does not have.
+
+#### CNSA 2.0 posture
+
+CNSA 2.0 names four algorithm families. Two are reachable in this component, and the build
+reports which:
+
+| Requirement | Algorithm | Status |
+| --- | --- | --- |
+| Key establishment | ML-KEM-768 / ML-KEM-1024 (FIPS 203) | Met, all three hybrid groups |
+| Authentication | ML-DSA-87 (FIPS 204) | Met with `Dockerfile.cnsa` |
+| Symmetric encryption | AES-256 | Not reachable |
+| Hashing | SHA-384 | Not reachable |
+
+AES-256 is not selectable: Go fixes TLS 1.3 cipher suite preference in the standard library
+and ignores `tls.Config.CipherSuites` for 1.3. A handshake negotiating ML-KEM-1024 with an
+ML-DSA-87 certificate still lands on `TLS_AES_128_GCM_SHA256`. Hashing follows suite
+selection. Neither has a GODEBUG override, so no configuration reaches them.
+
+`Dockerfile.cnsa` adds ML-DSA-87 authentication on top of `Dockerfile.fips`, which needs
+Go 1.27 (`crypto/mldsa` does not exist before it) and the in-process FIPS module:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose-cnsa.yml up -d --build
+```
+
+**The tradeoff: ML-DSA costs the CMVP certificate.** Go ships two FIPS modules and only one
+is validated.
+
+| | `GOFIPS140=certified` | `GOFIPS140=inprocess` |
+| --- | --- | --- |
+| Module | `v1.0.0-c2097c7c` | `v1.26.0` |
+| CMVP | Validated, holds a certificate | Modules In Process, Pending Review |
+| ML-DSA | Absent | Available |
+| CNSA families met | 1 of 4 | 2 of 4 |
+| Dockerfile | `Dockerfile.fips` | `Dockerfile.cnsa` |
+
+Go states the constraint directly. Building `Dockerfile.cnsa` with the validated module
+fails with `mldsa: unavailable in FIPS 140-3 Go Cryptographic Module v1.0.0`.
+
+Which posture a customer wants depends on a question only their assessor answers: whether
+an in-process module is acceptable as interim evidence. `Dockerfile.fips` stays the default
+because naming a certificate number is usually the harder requirement.
+
+To keep the validated module and give up post-quantum authentication, build the CNSA image
+with a classical certificate. ML-KEM key exchange is unaffected:
+
+```bash
+CERT_ALG=ecdsa-p384 docker compose -f docker-compose.yml -f docker-compose-cnsa.yml up -d --build
+```
+
+#### Certificate generation
+
+No public CA issues ML-DSA certificates yet, so `relay-proxy/certgen` issues the one the
+relay serves. `Dockerfile.cnsa` runs it during the build and the relay picks it up through
+`TLS_CERT` / `TLS_KEY`.
+
+```bash
+cd relay-proxy/certgen
+GOFIPS140=inprocess go run . -alg mldsa87 -out /tmp/certs -hosts relay-proxy,localhost
+```
+
+Certificates are self-signed and sized for a lab: an ML-DSA-87 certificate is around 7.5 KB
+DER against roughly 500 bytes for ECDSA P-384. Clients skip verification or trust the
+generated certificate. This shows the relay can serve an ML-DSA certificate; it says nothing
+about whether a customer's CA can issue one, which is a separate and unsolved problem.
+
+`-alg` accepts `mldsa87`, `mldsa65`, `mldsa44`, `ecdsa-p384`, and `ecdsa-p256`. The tool
+writes `tls.alg` next to the certificate so the build can assert on the algorithm without a
+certificate parser.
+
+#### Measuring what a relay negotiates
+
+A relay can have all three hybrid groups compiled in and still hand a client classical
+ECDH, with a successful handshake and nothing in the logs. `relay-proxy/crypto-probe`
+performs real handshakes and prints what came back as JSON:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose-cnsa.yml build crypto-probe
+docker run --rm --network launchdarkly-network ld-relay-lab:crypto-probe \
+  -target relay-proxy:8030
+```
+
+Against a relay built without `godebug tlssecpmlkem=1`, the NIST-curve profiles fail while
+`x25519` succeeds, and key establishment reports `unmet` naming the profiles that failed.
+
+Measuring this needs a TLS stack that supports ML-KEM group selection, which Node and the
+browser do not expose, so anything building a UI on these numbers has to call the probe
+rather than measure directly. Output shape, status semantics, and the build-posture caveat
+are in [relay-proxy/crypto-probe/README.md](relay-proxy/crypto-probe/README.md).
 
 #### Chainguard build
 

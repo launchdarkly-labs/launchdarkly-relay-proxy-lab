@@ -1,0 +1,178 @@
+# syntax=docker/dockerfile:1
+
+# Relay Proxy built for the closest CNSA 2.0 alignment this component can reach: Go 1.27
+# with the in-process FIPS module, which adds ML-DSA post-quantum signatures on top of the
+# ML-KEM key exchange that Dockerfile.fips already has.
+#
+# Two of the four CNSA 2.0 algorithm families are reachable here. The other two are Go
+# standard library limits, not configuration:
+#
+#   Key establishment   ML-KEM-768/1024 (FIPS 203)   met, all three hybrid groups
+#   Authentication      ML-DSA-87 (FIPS 204)         met, with a generated certificate
+#   Symmetric           AES-256                      not reachable
+#   Hashing             SHA-384                      not reachable
+#
+# AES-256 is not selectable because Go fixes TLS 1.3 cipher suite preference in the standard
+# library and ignores tls.Config.CipherSuites for 1.3. Measured: a handshake negotiating
+# ML-KEM-1024 with an ML-DSA-87 certificate still lands on TLS_AES_128_GCM_SHA256. Hashing
+# follows suite selection, so it moves only when the suite does. Neither has a GODEBUG.
+#
+# ------------------------------------------------------------------------------------
+# The tradeoff this file makes: ML-DSA costs the CMVP certificate
+# ------------------------------------------------------------------------------------
+# Go ships two FIPS modules and only one is validated:
+#
+#   GOFIPS140=certified   Go Cryptographic Module v1.0.0-c2097c7c. Holds a CMVP
+#                         certificate. Has no ML-DSA at all; asking for it returns
+#                         "mldsa: unavailable in FIPS 140-3 Go Cryptographic Module v1.0.0".
+#
+#   GOFIPS140=inprocess   Go Cryptographic Module v1.26.0. Has ML-DSA. On the CMVP Modules
+#                         In Process list, which means Pending Review and not validated.
+#
+# So post-quantum signatures and a validated module are mutually exclusive today. This file
+# takes the in-process module and therefore gives up the certificate. Dockerfile.fips makes
+# the opposite choice and is the right default for anyone who has to name a certificate
+# number to an assessor.
+#
+# Which one a customer wants depends on a question only their assessor answers: whether an
+# in-process module is acceptable as interim evidence. Build both and let them compare.
+#
+# Build:
+#
+#   docker compose -f docker-compose.yml -f docker-compose-cnsa.yml up -d --build
+#
+# Build args:
+#
+#   LD_RELAY_VERSION  upstream release tag to compile (default 8.16.4)
+#   CERT_ALG          certificate signature algorithm (default mldsa87). ecdsa-p384 falls
+#                     back to classical authentication while keeping ML-KEM key exchange.
+
+ARG LD_RELAY_VERSION=8.16.4
+ARG GOFIPS140=inprocess
+ARG CERT_ALG=mldsa87
+
+# Go 1.27 is the requirement, not a preference: crypto/mldsa does not exist before it, and
+# neither do the MLDSA44/65/87 signature schemes in crypto/tls and crypto/x509.
+FROM golang:1.27.0-alpine3.24 AS builder
+
+ARG SRC_DIR=/go/ld-relay
+ARG LD_RELAY_VERSION
+ARG GOFIPS140
+ARG CERT_ALG
+
+RUN apk --no-cache add \
+    libc-dev \
+ && rm -rf /var/cache/apk/*
+
+RUN mkdir -p $SRC_DIR
+
+WORKDIR $SRC_DIR
+
+ADD https://github.com/launchdarkly/ld-relay/archive/refs/tags/v${LD_RELAY_VERSION}.tar.gz /tmp/ld-relay.tar.gz
+RUN tar -xzf /tmp/ld-relay.tar.gz -C $SRC_DIR --strip-components=1 \
+    && rm /tmp/ld-relay.tar.gz
+
+# Enable the ML-KEM hybrid key exchange groups on the NIST P curves: SecP256r1MLKEM768 and
+# SecP384r1MLKEM1024.
+#
+# The `go` directive in a module's go.mod selects Go's compatibility defaults and Go bakes
+# them into the binary. Release 8.16.4 declares `go 1.24.0`, which carries tlssecpmlkem=0
+# and turns those two groups off. Building with a Go 1.27 toolchain does not change this,
+# because Go honors the module's declared version.
+#
+# Left alone, the relay serves post-quantum key exchange to browsers and silently falls back
+# to classical ECDH for a client offering only the NIST-curve groups. The downgrade is
+# invisible: X25519MLKEM768 stays enabled and satisfies most clients, so the handshake
+# succeeds and the relay logs nothing.
+RUN if grep -q '^godebug tlssecpmlkem=' go.mod; then \
+      echo "skipped: go.mod already sets tlssecpmlkem"; \
+    else \
+      printf '\ngodebug tlssecpmlkem=1\n' >> go.mod && \
+      echo "patched: go.mod godebug tlssecpmlkem=1"; \
+    fi
+
+ENV CGO_ENABLED=0
+ENV GOOS=linux
+ENV GOFIPS140=${GOFIPS140}
+ENV GOPATH=/go
+
+RUN go build -a -o ldr . && \
+    go version -m ldr | grep -q 'GOFIPS140=' && \
+    echo "verified: FIPS module linked" && \
+    ! go version -m ldr | grep -q 'tlssecpmlkem=0' && \
+    echo "verified: ML-KEM hybrid key exchange not disabled"
+
+# Issue the TLS certificate. No public CA issues ML-DSA certificates yet, so demonstrating
+# CNSA 2.0 authentication means generating one here. Self-signed, for a lab: clients skip
+# verification or trust this certificate.
+COPY certgen /certgen
+WORKDIR /certgen
+RUN go mod edit -go=1.27.0 && \
+    go run . -alg ${CERT_ALG} -out /certs -hosts relay-proxy,relay-proxy-cnsa,localhost,127.0.0.1
+
+# Fail the build if the certificate did not come out post-quantum while ML-DSA was asked
+# for. Without this the image would serve a classical certificate and still be labeled as
+# CNSA-aligned, which is the one mistake this whole file exists to avoid.
+# certgen writes the algorithm to /certs/tls.alg for exactly this check. The builder image
+# has no openssl, and an openssl old enough to be packaged would not name ML-DSA anyway.
+RUN alg="$(cat /certs/tls.alg)"; \
+    case "${CERT_ALG}" in \
+      mldsa*) \
+        case "$alg" in \
+          ML-DSA-*) echo "verified: certificate signed with $alg" ;; \
+          *) echo "ERROR: CERT_ALG=${CERT_ALG} produced a '$alg' certificate." >&2; \
+             echo "       GOFIPS140=${GOFIPS140}; the validated module has no ML-DSA." >&2; \
+             exit 1 ;; \
+        esac ;; \
+      *) \
+        echo "note: certificate is $alg, so CNSA 2.0 authentication is not met by this image" ;; \
+    esac
+
+FROM alpine:3.24.1
+
+ARG GOFIPS140
+ARG LD_RELAY_VERSION
+ARG CERT_ALG
+
+RUN addgroup -g 1000 -S ldr-user && \
+    adduser -u 1000 -S ldr-user -G ldr-user && \
+    mkdir /ldr && \
+    chown 1000:1000 /ldr
+
+RUN apk add --no-cache \
+    ca-certificates \
+ && apk add --upgrade libcrypto3 libssl3 \
+ && update-ca-certificates \
+ && rm -rf /var/cache/apk/*
+
+ARG SRC_DIR=/go/ld-relay
+
+COPY --from=builder ${SRC_DIR}/ldr /usr/bin/ldr
+COPY --from=builder --chown=1000:1000 /certs /certs
+
+# fips140.status records that this image trades the CMVP certificate for ML-DSA, so an
+# operator holding it can tell which of the two postures they are running.
+LABEL org.opencontainers.image.title="LaunchDarkly Relay Proxy (CNSA 2.0 posture)" \
+      org.opencontainers.image.version="${LD_RELAY_VERSION}" \
+      com.launchdarkly.relay.fips140.mechanism="go-native-module" \
+      com.launchdarkly.relay.fips140.module="${GOFIPS140}" \
+      com.launchdarkly.relay.fips140.status="in-process, not CMVP-validated" \
+      com.launchdarkly.relay.fips140.mode="only" \
+      com.launchdarkly.relay.pqc.mlkem="all-three-groups" \
+      com.launchdarkly.relay.pqc.signature="${CERT_ALG}" \
+      com.launchdarkly.relay.cnsa2="key-establishment,authentication"
+
+ENV GODEBUG=fips140=only
+
+# TLS on, so the post-quantum handshake is observable. Dockerfile.fips serves plaintext,
+# where none of this can be seen from outside.
+ENV TLS_ENABLED=true
+ENV TLS_CERT=/certs/tls.crt
+ENV TLS_KEY=/certs/tls.key
+ENV TLS_MIN_VERSION=1.3
+
+USER 1000
+
+EXPOSE 8030
+ENV PORT=8030
+ENTRYPOINT ["/usr/bin/ldr", "--config", "/ldr/ld-relay.conf", "--allow-missing-file", "--from-env"]
