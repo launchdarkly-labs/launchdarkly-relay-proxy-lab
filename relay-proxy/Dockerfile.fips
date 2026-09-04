@@ -1,9 +1,38 @@
 # syntax=docker/dockerfile:1
 
-# This is a standalone Dockerfile that does not depend on goreleaser building the binary
-# It is NOT the version that is pushed to dockerhub
-# FIPS 140-3: native Go Cryptographic Module (GOFIPS140). Based on ld-relay v8 Dockerfile.
-FROM golang:1.26.4-alpine3.24 as builder
+# Relay Proxy built against the FIPS 140-3 Go Cryptographic Module, with post-quantum
+# key exchange enabled.
+#
+# Standalone: it compiles the relay from an upstream release tarball rather than consuming
+# a published image, because the FIPS module and the TLS defaults are both build-time
+# choices. Not the image published to Docker Hub.
+#
+# Crypto here is entirely inside the Go binary. CGO_ENABLED=0 makes it static, so there is
+# no OpenSSL in the picture. Dockerfile.chainguard in this directory does the opposite:
+# same relay, crypto in libcrypto via CGO, under a different vendor's FIPS certificate.
+#
+# Build:
+#
+#   docker compose -f docker-compose.yml -f docker-compose-fips.yml up -d --build
+#
+# Build args:
+#
+#   LD_RELAY_VERSION  upstream release tag to compile (default 8.16.4)
+#   GOFIPS140         which Go Cryptographic Module to link. `v1.0.0` or `certified` is
+#                     the validated module. `v1.26.0` or `inprocess` is under review and
+#                     adds ML-DSA, the post-quantum signature algorithm.
+#
+# The build prints the module it linked and where to look up its CMVP certificate. It
+# writes the same facts into the image under /etc/launchdarkly/, readable at runtime:
+#
+#   docker compose exec relay-proxy cat /etc/launchdarkly/fips-readme
+
+ARG GOFIPS140=v1.0.0
+# Declared here as well as in each stage below. An ARG re-declared in a later stage starts
+# empty unless the value was passed with --build-arg, which leaves the runtime LABEL blank.
+ARG LD_RELAY_VERSION=8.16.4
+
+FROM golang:1.26.4-alpine3.24 AS builder
 # See "Runtime platform versions" in CONTRIBUTING.md
 
 RUN apk --no-cache add \
@@ -12,6 +41,7 @@ RUN apk --no-cache add \
 
 ARG SRC_DIR=/go/ld-relay
 ARG LD_RELAY_VERSION=8.16.4
+ARG GOFIPS140
 
 RUN mkdir -p $SRC_DIR
 
@@ -21,14 +51,113 @@ ADD https://github.com/launchdarkly/ld-relay/archive/refs/tags/v${LD_RELAY_VERSI
 RUN tar -xzf /tmp/ld-relay.tar.gz -C $SRC_DIR --strip-components=1 \
     && rm /tmp/ld-relay.tar.gz
 
+# Enable the ML-KEM hybrid key exchange groups on the NIST P curves: SecP256r1MLKEM768 and
+# SecP384r1MLKEM1024.
+#
+# The `go` directive in a module's go.mod selects Go's compatibility defaults, and Go bakes
+# them into every binary it builds. Release 8.16.4 declares `go 1.24.0`, which carries
+# tlssecpmlkem=0 and turns those two groups off. A newer builder toolchain does not change
+# this; Go honors the module's declared version, so building with Go 1.26 still produces a
+# binary with the groups disabled.
+#
+# Left alone, the relay serves post-quantum key exchange to browsers and silently falls
+# back to classical ECDH for a client that offers only the NIST-curve groups. The
+# downgrade is invisible: X25519MLKEM768 stays enabled and satisfies most clients, so the
+# handshake succeeds and the relay logs nothing.
+#
+# The godebug directive sets that one default and leaves the module's minimum toolchain
+# where the release put it. Skipped if the line is already present, so this becomes a no-op
+# when a future release ships it.
+RUN if grep -q '^godebug tlssecpmlkem=' go.mod; then \
+      echo "skipped: go.mod already sets tlssecpmlkem"; \
+    else \
+      printf '\ngodebug tlssecpmlkem=1\n' >> go.mod && \
+      echo "patched: go.mod godebug tlssecpmlkem=1"; \
+    fi
+
+# CGO_ENABLED=0 keeps the binary static, so the crypto module is linked in and the runtime
+# image needs no libcrypto or libssl at all. `ldd /usr/bin/ldr` on the result reports it is
+# not a dynamic program.
 ENV CGO_ENABLED=0
 ENV GOOS=linux
-ENV GOFIPS140=v1.0.0
+ENV GOFIPS140=${GOFIPS140}
 ENV GOPATH=/go
 
-RUN go build -a -o ldr .
+# Identify the module for anyone who has to look up its CMVP certificate, and record the
+# result in the image.
+#
+# The status comes from the toolchain's own alias files rather than from a build arg, so it
+# reports what was actually linked. The requested version is resolved through its per-version
+# alias file first: certified.txt holds a patch-suffixed string (v1.0.0-c2097c7c) while a
+# bare v1.0.0.txt alias points at the same module, so `v1.0.0` is valid but will not match
+# certified.txt directly.
+#
+# A version this toolchain does not ship stops the build. Continuing would link a module and
+# then describe it inaccurately.
+#
+# The resolved values go to files because the runtime stage cannot read a variable set here.
+RUN set -e; \
+    fips_dir=/usr/local/go/lib/fips140; \
+    certified="$(cat $fips_dir/certified.txt)"; \
+    inprocess="$(cat $fips_dir/inprocess.txt)"; \
+    case "${GOFIPS140}" in \
+      certified) resolved="$certified" ;; \
+      inprocess) resolved="$inprocess" ;; \
+      *) \
+        if [ -f "$fips_dir/${GOFIPS140}.txt" ]; then \
+          resolved="$(cat "$fips_dir/${GOFIPS140}.txt")"; \
+        else \
+          resolved="${GOFIPS140}"; \
+        fi ;; \
+    esac; \
+    if [ ! -f "$fips_dir/${resolved}.zip" ]; then \
+      echo "ERROR: GOFIPS140=${GOFIPS140} resolved to '$resolved', which this toolchain" >&2; \
+      echo "       does not ship. Available modules:" >&2; \
+      ls "$fips_dir" | sed -n 's/^\(.*\)\.zip$/         \1/p' >&2; \
+      echo "       certified=$certified  inprocess=$inprocess" >&2; \
+      exit 1; \
+    fi; \
+    case "$resolved" in \
+      "$certified") status="certified" ;; \
+      "$inprocess") status="in-process" ;; \
+      *)            status="unclassified" ;; \
+    esac; \
+    printf '%s' "$status"   > /fips-status; \
+    printf '%s' "$resolved" > /fips-module; \
+    echo "===================================================================="; \
+    echo " FIPS 140-3 crypto boundary"; \
+    echo "===================================================================="; \
+    echo " mechanism      : native Go Cryptographic Module (GOFIPS140)"; \
+    echo "                  statically linked, CGO_ENABLED=0, no OpenSSL involved"; \
+    echo " module         : Go Cryptographic Module $resolved"; \
+    echo " requested as   : GOFIPS140=${GOFIPS140}"; \
+    echo " status         : $status"; \
+    echo "                  from $fips_dir/certified.txt = $certified"; \
+    echo "                   and $fips_dir/inprocess.txt = $inprocess"; \
+    echo " toolchain      : $(go version)"; \
+    echo " built          : $(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
+    echo "--------------------------------------------------------------------"; \
+    echo " Look up the certificate by searching CMVP for the module string above."; \
+    echo "   validated : https://csrc.nist.gov/projects/cryptographic-module-validation-program/validated-modules"; \
+    echo "   in process: https://csrc.nist.gov/Projects/cryptographic-module-validation-program/modules-in-process/Modules-In-Process-List"; \
+    echo "   Go's mapping of module versions: https://go.dev/doc/security/fips140"; \
+    echo " 'in-process' means Pending Review rather than validated."; \
+    echo "===================================================================="
+
+# Both greps catch a silent regression. Without GOFIPS140 the build still succeeds and
+# produces a binary that looks the same but links Go's standard crypto. Without the go.mod
+# patch above, two of the three ML-KEM hybrid groups go back to being disabled. Neither
+# shows up at runtime, so they are checked here.
+RUN go build -a -o ldr . && \
+    go version -m ldr | grep -q 'GOFIPS140=' && \
+    echo "verified: FIPS module linked" && \
+    ! go version -m ldr | grep -q 'tlssecpmlkem=0' && \
+    echo "verified: ML-KEM hybrid key exchange not disabled"
 
 FROM alpine:3.24.1
+
+ARG GOFIPS140
+ARG LD_RELAY_VERSION
 
 RUN addgroup -g 1000 -S ldr-user && \
     adduser -u 1000 -S ldr-user -G ldr-user && \
@@ -44,6 +173,32 @@ RUN apk add --no-cache \
 ARG SRC_DIR=/go/ld-relay
 
 COPY --from=builder ${SRC_DIR}/ldr /usr/bin/ldr
+
+# Carry the module identity into the image so it is available without the build log.
+COPY --from=builder /fips-status /fips-module /etc/launchdarkly/
+RUN echo "Go Cryptographic Module $(cat /etc/launchdarkly/fips-module) ($(cat /etc/launchdarkly/fips-status)); look up the certificate at https://csrc.nist.gov/projects/cryptographic-module-validation-program" \
+      > /etc/launchdarkly/fips-readme
+
+# fips140.mechanism separates this image from the Chainguard build, which is the distinction
+# that matters when tracing crypto back to a certificate. fips140.module is the requested
+# version; the module actually linked is in /etc/launchdarkly/fips-module, since a LABEL can
+# only interpolate build args.
+LABEL org.opencontainers.image.title="LaunchDarkly Relay Proxy (FIPS 140-3)" \
+      org.opencontainers.image.version="${LD_RELAY_VERSION}" \
+      com.launchdarkly.relay.fips140.mechanism="go-native-module" \
+      com.launchdarkly.relay.fips140.module="${GOFIPS140}" \
+      com.launchdarkly.relay.fips140.identity="/etc/launchdarkly/fips-module" \
+      com.launchdarkly.relay.fips140.mode="only" \
+      com.launchdarkly.relay.pqc.mlkem="all-three-groups"
+
+# `only` is enforcing mode: the module rejects non-approved algorithms at runtime, and
+# fips140.Enforced() reports true. The alternative, `on`, links the same module but stays
+# permissive and leaves non-approved algorithms usable.
+#
+# Enforcing mode is also what blocks DES, 3DES, RC4, MD5 and SHA-1. Those primitives remain
+# linked in the binary through crypto/tls and crypto/x509, so they are unreachable at
+# runtime rather than absent from the image.
+ENV GODEBUG=fips140=only
 
 USER 1000
 

@@ -140,12 +140,88 @@ docker-compose logs -f
 # Default — official LaunchDarkly image
 docker compose up -d
 
-# LaunchDarkly native FIPS (GOFIPS140, relay-proxy/Dockerfile.fips)
+# Native Go FIPS 140-3 + post-quantum (relay-proxy/Dockerfile.fips)
+# No license needed. Start here.
 docker compose -f docker-compose.yml -f docker-compose-fips.yml up -d --build
 
-# Chainguard go-fips only (relay-proxy/Dockerfile.chainguard; set CHAINGUARD_ORG in .env)
+# Chainguard go-fips — OpenSSL-backed FIPS (relay-proxy/Dockerfile.chainguard)
+# Needs a commercial Chainguard license; see "Chainguard build" below.
 docker compose -f docker-compose.yml -f docker-compose-chainguard.yml up -d --build
 ```
+
+Both hardened builds compile the relay from the upstream `LD_RELAY_VERSION` release tarball
+rather than pulling a published image, so the crypto configuration is a build-time choice.
+
+#### What the hardened builds change
+
+Three things, on top of what the official image does:
+
+1. **Post-quantum key exchange is actually enabled.** The relay's `go.mod` declares
+   `go 1.24.0`, and that directive bakes `tlssecpmlkem=0` into the binary, which disables
+   the two ML-KEM hybrid groups on the NIST P curves. Using a newer Go toolchain does not
+   override it. Both Dockerfiles append `godebug tlssecpmlkem=1` before building.
+
+   Worth understanding because the failure is silent: `X25519MLKEM768` stays enabled, so
+   browsers negotiate post-quantum fine and a smoke test passes. Only a FIPS-constrained
+   client offering NIST-curve PQC gets downgraded to classical ECDH — with no error and no
+   log line.
+
+2. **FIPS is enforced, not just available.** `Dockerfile.fips` sets
+   `GODEBUG=fips140=only`. Selecting the module with `GOFIPS140` alone leaves it
+   *permissive*, where non-approved algorithms remain usable and `fips140.Enforced()`
+   reports false.
+
+3. **The build identifies its own crypto boundary.** Each build prints the module it linked
+   and where to look the certificate up. `Dockerfile.fips` also writes this into the image
+   at `/etc/launchdarkly/`, so it is readable from a running container:
+
+   ```bash
+   docker run --rm --entrypoint /bin/sh ld-relay-lab:fips-hardened \
+     -c 'cat /etc/launchdarkly/fips-readme'
+   ```
+
+   No CMVP certificate number is hardcoded anywhere. A pinned number asserts a validation
+   status that can go stale without the build changing, and it is the field an assessor
+   copies down. The build emits the module identity and the CMVP search URLs instead.
+
+The builds also assert their own hardening. If `GOFIPS140` were dropped, or the `go.mod`
+patch failed, the build fails rather than producing an image that looks hardened and is not.
+
+#### FIPS module selection
+
+`Dockerfile.fips` defaults to `GOFIPS140=v1.0.0`, which resolves to the module Go
+classifies as `certified`. To build against the in-process module instead — it adds ML-DSA,
+the post-quantum *signature* algorithm, but is Pending Review rather than validated:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose-fips.yml build \
+  --build-arg GOFIPS140=inprocess
+```
+
+The build log reports which module resolved and how it was classified. Validation status is
+derived from the toolchain's own alias files, not passed in, so the label cannot claim a
+status the linked module does not have.
+
+#### Chainguard build
+
+`Dockerfile.chainguard` uses Chainguard's `go-fips` toolchain, where crypto is performed by
+FIPS-validated OpenSSL through CGO. Those images are commercial-tier:
+
+```bash
+# 1. Install chainctl — https://edu.chainguard.dev/chainguard/chainctl/
+# 2. chainctl auth login
+# 3. Add your org to .env
+echo 'CHAINGUARD_ORG=your-org' >> .env
+# 4. Build
+docker compose -f docker-compose.yml -f docker-compose-chainguard.yml up -d --build
+```
+
+Without an entitled org the build stops at the first `FROM` with a registry auth error.
+That is expected — use `Dockerfile.fips`, which needs no license and demonstrates the same
+post-quantum behavior.
+
+Its build-time checks have not been run against the real toolchain yet, since the images are
+gated. If one trips on your first build, the check is more likely wrong than your build.
 
 ### 4. Changing Configuration
 
@@ -1079,8 +1155,11 @@ This application uses a microservices architecture with nine specialized contain
 **relay-proxy** (Relay Proxy Container):
 - LaunchDarkly Relay Proxy v9.0.0-rc.5 (FDv2 `/sdk/stream` for the Data System Builder)
 - Default: official `launchdarkly/ld-relay` image (`docker-compose.yml`)
-- FIPS: local build via `docker-compose-fips.yml` + `relay-proxy/Dockerfile.fips` (native Go `GOFIPS140=v1.0.0`)
-- Chainguard: local build via `docker-compose-chainguard.yml` + `relay-proxy/Dockerfile.chainguard`
+- FIPS: local build via `docker-compose-fips.yml` + `relay-proxy/Dockerfile.fips`: native Go
+  Cryptographic Module (`GOFIPS140=v1.0.0`), static binary, `GODEBUG=fips140=only` enforcing,
+  ML-KEM hybrid key exchange enabled. No license required
+- Chainguard: local build via `docker-compose-chainguard.yml` + `relay-proxy/Dockerfile.chainguard`:
+  FIPS-validated OpenSSL via CGO, dynamically linked. Requires a commercial Chainguard license
 - AutoConfig mode
 - Event forwarding enabled
 - Redis integration for persistent storage
