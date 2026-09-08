@@ -34,7 +34,7 @@
 # a build, since the images are gated. If one fails on a first licensed build, compare the
 # real output against what it expects before changing the build.
 
-ARG LD_RELAY_VERSION=8.16.4
+ARG LD_RELAY_VERSION=9.0.0-rc.5
 ARG CHAINGUARD_ORG
 
 FROM cgr.dev/${CHAINGUARD_ORG}/go-fips:latest AS builder
