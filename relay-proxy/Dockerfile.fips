@@ -154,6 +154,17 @@ RUN go build -a -o ldr . && \
     ! go version -m ldr | grep -q 'tlssecpmlkem=0' && \
     echo "verified: ML-KEM hybrid key exchange not disabled"
 
+# Assert that no legacy cipher suite or pre-1.2 protocol version can be negotiated by this
+# crypto stack. This is the audit-relevant claim: RC4, DES, MD5 and SHA-1 stay linked in the
+# binary through crypto/tls and crypto/x509, so the honest statement is that a peer cannot
+# negotiate them, not that they are absent.
+#
+# Runs here so a toolchain change that reintroduces a suite fails the build. The tool
+# carries a positive control and exits 2 if its own ClientHello stops working, which
+# distinguishes a broken test from a real finding.
+COPY tlsassert /tlsassert
+RUN cd /tlsassert && go mod edit -go=$(go env GOVERSION | sed 's/^go//') && go run .
+
 FROM alpine:3.24.1
 
 ARG GOFIPS140
@@ -188,17 +199,29 @@ LABEL org.opencontainers.image.title="LaunchDarkly Relay Proxy (FIPS 140-3)" \
       com.launchdarkly.relay.fips140.mechanism="go-native-module" \
       com.launchdarkly.relay.fips140.module="${GOFIPS140}" \
       com.launchdarkly.relay.fips140.identity="/etc/launchdarkly/fips-module" \
-      com.launchdarkly.relay.fips140.mode="only" \
+      com.launchdarkly.relay.fips140.mode="on" \
+      com.launchdarkly.relay.tls.legacy-suites="none-negotiable" \
       com.launchdarkly.relay.pqc.mlkem="all-three-groups"
 
-# `only` is enforcing mode: the module rejects non-approved algorithms at runtime, and
-# fips140.Enforced() reports true. The alternative, `on`, links the same module but stays
-# permissive and leaves non-approved algorithms usable.
+# `on` links the validated module and keeps it in permissive mode. `only` is the enforcing
+# mode, and it cannot be used here: the LaunchDarkly evaluation engine hashes context keys
+# with SHA-1 to compute percentage rollout buckets, and crypto/sha1 panics unconditionally
+# under fips140=only. The relay then panics on every client-side flag evaluation with
+# "crypto/sha1: use of SHA-1 is not allowed in FIPS 140-only mode". Measured against
+# go-server-sdk-evaluation v3.0.1, evaluator_bucketing.go:99. This matches LaunchDarkly's
+# published FIPS guidance, which specifies fips140=on.
 #
-# Enforcing mode is also what blocks DES, 3DES, RC4, MD5 and SHA-1. Those primitives remain
-# linked in the binary through crypto/tls and crypto/x509, so they are unreachable at
-# runtime rather than absent from the image.
-ENV GODEBUG=fips140=only
+# What `on` costs, measured: direct calls to MD5, 3DES and RC4 stop panicking and become
+# reachable. What it does not cost is any TLS behavior. TLS 1.0 and 1.1 are refused under
+# both modes, the negotiated suites are identical, and all three ML-KEM hybrid groups work
+# under both. The tlsassert step above measures that rather than assuming it.
+#
+# So the accurate claim is narrower than "enforcing": the validated module is linked, the
+# TLS surface refuses every legacy suite and pre-1.2 version, and fips140.Enforced() is
+# false. Legacy primitives stay linked in the binary through crypto/tls and crypto/x509 and
+# cannot be removed without forking the toolchain, so unreachable-over-TLS is the claim the
+# evidence supports.
+ENV GODEBUG=fips140=on
 
 USER 1000
 

@@ -36,7 +36,7 @@ Or run it from source, which is faster while iterating:
 
 ```bash
 cd relay-proxy/crypto-probe
-GOFIPS140=inprocess GODEBUG=fips140=only go run . -target relay-proxy:8030
+GOFIPS140=inprocess GODEBUG=fips140=on go run . -target relay-proxy:8030
 ```
 
 Flags: `-target host:port`, `-timeout` (default 5s per handshake), `-insecure` (default
@@ -53,7 +53,7 @@ handshake is a measurement, so read `cnsa2[].status` rather than the exit code.
   "target": "relay-proxy:8030",
   "build": {
     "go_version": "go1.27.0",
-    "fips_enforced": true,
+    "fips_enforced": false,
     "fips_module": "v1.26.0",
     "mldsa_available": true,
     "mlkem_groups_enabled": 3
@@ -126,6 +126,12 @@ measurements:
 | Go 1.27 + `GOFIPS140=inprocess` | Everything this tool can measure |
 | Go 1.27 + `GOFIPS140=certified` | `mldsa_available: false`, marks authentication unavailable |
 | Go 1.26 or older | `mldsa_available: false`, ML-DSA absent from the toolchain |
+
+`fips_enforced` is false in the shipped image, and that is expected. The relay images run
+`GODEBUG=fips140=on` rather than `only`, because the LaunchDarkly evaluation engine hashes
+context keys with SHA-1 for percentage rollout bucketing and `crypto/sha1` panics under
+`only`. TLS behavior is identical under both modes, so `fips_enforced: false` does not
+weaken any handshake measurement below.
 
 A probe built against the validated FIPS module marks authentication unmet even against a
 relay serving an ML-DSA-87 certificate. That is the probe's limit rather than the relay's,

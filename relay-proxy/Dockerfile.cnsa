@@ -128,6 +128,17 @@ RUN alg="$(cat /certs/tls.alg)"; \
         echo "note: certificate is $alg, so CNSA 2.0 authentication is not met by this image" ;; \
     esac
 
+# Assert that no legacy cipher suite or pre-1.2 protocol version can be negotiated by this
+# crypto stack. This is the audit-relevant claim: RC4, DES, MD5 and SHA-1 stay linked in the
+# binary through crypto/tls and crypto/x509, so the honest statement is that a peer cannot
+# negotiate them, not that they are absent.
+#
+# Runs here so a toolchain change that reintroduces a suite fails the build. The tool
+# carries a positive control and exits 2 if its own ClientHello stops working, which
+# distinguishes a broken test from a real finding.
+COPY tlsassert /tlsassert
+RUN cd /tlsassert && go mod edit -go=$(go env GOVERSION | sed 's/^go//') && go run .
+
 FROM alpine:3.24.1
 
 ARG GOFIPS140
@@ -157,12 +168,17 @@ LABEL org.opencontainers.image.title="LaunchDarkly Relay Proxy (CNSA 2.0 posture
       com.launchdarkly.relay.fips140.mechanism="go-native-module" \
       com.launchdarkly.relay.fips140.module="${GOFIPS140}" \
       com.launchdarkly.relay.fips140.status="in-process, not CMVP-validated" \
-      com.launchdarkly.relay.fips140.mode="only" \
+      com.launchdarkly.relay.fips140.mode="on" \
+      com.launchdarkly.relay.tls.legacy-suites="none-negotiable" \
       com.launchdarkly.relay.pqc.mlkem="all-three-groups" \
       com.launchdarkly.relay.pqc.signature="${CERT_ALG}" \
       com.launchdarkly.relay.cnsa2="key-establishment,authentication"
 
-ENV GODEBUG=fips140=only
+# `on` rather than `only`: the LaunchDarkly evaluation engine hashes context keys with
+# SHA-1 for percentage rollout bucketing, and crypto/sha1 panics under fips140=only, which
+# makes the relay panic on every client-side evaluation. TLS behavior is identical under
+# both modes, including all three ML-KEM groups. See Dockerfile.fips for the measurements.
+ENV GODEBUG=fips140=on
 
 # TLS on, so the post-quantum handshake is observable. Dockerfile.fips serves plaintext,
 # where none of this can be seen from outside.

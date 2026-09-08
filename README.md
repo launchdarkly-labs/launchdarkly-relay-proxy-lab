@@ -166,16 +166,40 @@ Three things, on top of what the official image does:
    override it. Both Dockerfiles append `godebug tlssecpmlkem=1` before building.
 
    Worth understanding because the failure is silent: `X25519MLKEM768` stays enabled, so
-   browsers negotiate post-quantum fine and a smoke test passes. Only a FIPS-constrained
-   client offering NIST-curve PQC gets downgraded to classical ECDH — with no error and no
-   log line.
+   browsers negotiate post-quantum normally and a smoke test passes. A FIPS-constrained
+   client offering only NIST-curve PQC gets classical ECDH while the handshake succeeds and
+   the relay logs nothing.
 
-2. **FIPS is enforced, not just available.** `Dockerfile.fips` sets
-   `GODEBUG=fips140=only`. Selecting the module with `GOFIPS140` alone leaves it
-   *permissive*, where non-approved algorithms remain usable and `fips140.Enforced()`
-   reports false.
+2. **The validated FIPS module is linked, in permissive mode.** `Dockerfile.fips` sets
+   `GODEBUG=fips140=on`, so `fips140.Enforced()` reports false.
 
-3. **The build identifies its own crypto boundary.** Each build prints the module it linked
+   `fips140=only` is the enforcing mode and cannot be used here. The LaunchDarkly
+   evaluation engine hashes context keys with SHA-1 to compute percentage rollout buckets
+   (`go-server-sdk-evaluation v3.0.1`, `evaluator_bucketing.go:99`), and `crypto/sha1`
+   panics unconditionally under `only`. The relay then panics on every client-side flag
+   evaluation with `crypto/sha1: use of SHA-1 is not allowed in FIPS 140-only mode`. This
+   is why LaunchDarkly's published FIPS guidance specifies `on`.
+
+   Measured cost of `on` versus `only`: direct calls to MD5, 3DES and RC4 stop panicking
+   and become reachable. No TLS behavior changes. TLS 1.0 and 1.1 are refused under both
+   modes, negotiated suites are identical, and all three ML-KEM hybrid groups work under
+   both.
+
+3. **No legacy cipher suite is negotiable, and the build proves it.** RC4, DES, MD5 and
+   SHA-1 stay linked in any Go binary that imports `crypto/tls` or `crypto/x509`, so
+   "absent from the image" is not a claim this project can make. `relay-proxy/tlsassert`
+   runs during the build and offers each legacy suite in a raw ClientHello against a server
+   with no suite restriction:
+
+   ```
+   result : 0 of 13 legacy configurations negotiable
+   ```
+
+   Covers RC4, 3DES, RSA-CBC-SHA, NULL, anonymous DH, and TLS 1.0/1.1. The tool carries a
+   positive control and exits 2 if its own ClientHello stops working, so a broken test is
+   distinguishable from a real finding.
+
+4. **The build identifies its own crypto boundary.** Each build prints the module it linked
    and where to look the certificate up. `Dockerfile.fips` also writes this into the image
    at `/etc/launchdarkly/`, so it is readable from a running container:
 
@@ -188,8 +212,9 @@ Three things, on top of what the official image does:
    status that can go stale without the build changing, and it is the field an assessor
    copies down. The build emits the module identity and the CMVP search URLs instead.
 
-The builds also assert their own hardening. If `GOFIPS140` were dropped, or the `go.mod`
-patch failed, the build fails rather than producing an image that looks hardened and is not.
+Each build asserts its own hardening. Dropping `GOFIPS140`, failing to apply the `go.mod`
+patch, or a toolchain change that reintroduces a legacy suite fails the build rather than
+producing an image that looks hardened and is not.
 
 #### FIPS module selection
 
@@ -1249,8 +1274,8 @@ This application uses a microservices architecture with nine specialized contain
 - LaunchDarkly Relay Proxy v9.0.0-rc.5 (FDv2 `/sdk/stream` for the Data System Builder)
 - Default: official `launchdarkly/ld-relay` image (`docker-compose.yml`)
 - FIPS: local build via `docker-compose-fips.yml` + `relay-proxy/Dockerfile.fips`: native Go
-  Cryptographic Module (`GOFIPS140=v1.0.0`), static binary, `GODEBUG=fips140=only` enforcing,
-  ML-KEM hybrid key exchange enabled. No license required
+  Cryptographic Module (`GOFIPS140=v1.0.0`), static binary, `GODEBUG=fips140=on`, ML-KEM
+  hybrid key exchange enabled, no legacy cipher suite negotiable. No license required
 - Chainguard: local build via `docker-compose-chainguard.yml` + `relay-proxy/Dockerfile.chainguard`:
   FIPS-validated OpenSSL via CGO, dynamically linked. Requires a commercial Chainguard license
 - AutoConfig mode

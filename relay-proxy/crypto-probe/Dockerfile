@@ -40,9 +40,10 @@ COPY --from=builder /crypto-probe /usr/bin/crypto-probe
 LABEL org.opencontainers.image.title="ld-relay crypto probe" \
       com.launchdarkly.relay.probe.fips140.module="${GOFIPS140}"
 
-# Enforcing, to match the relay images. fips140.Enforced() is reported in the JSON, and a
-# permissive probe reporting on an enforcing relay would be a misleading pairing.
-ENV GODEBUG=fips140=only
+# Matches the relay images, which use `on` because the LaunchDarkly evaluation engine hashes
+# context keys with SHA-1 and crypto/sha1 panics under `only`. fips140.Enforced() is
+# reported in the JSON so a consumer can see which mode produced a measurement.
+ENV GODEBUG=fips140=on
 
 USER 1000
 

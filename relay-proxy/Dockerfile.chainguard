@@ -20,15 +20,15 @@
 # How this differs from Dockerfile.fips, which matters when tracing crypto to a certificate:
 #
 #   Dockerfile.fips   Go's native Cryptographic Module. CGO_ENABLED=0, static binary,
-#                     crypto inside the binary, enforced with GODEBUG=fips140=only.
+#                     crypto inside the binary, with GODEBUG=fips140=on.
 #
 #   this file         Chainguard's FIPS-validated OpenSSL through CGO, via the go-fips
 #                     toolchain's systemcrypto build tag. Crypto lives in libcrypto,
 #                     outside the binary, and the certificate is Chainguard's.
 #
-# GOFIPS140 and fips140=only belong to the Go module and have no effect here, so they are
-# not set. The go-fips toolchain carries its own defaults and Chainguard's documentation
-# asks that they not be overridden.
+# GOFIPS140 and the fips140 GODEBUG belong to the Go module and have no effect here, so
+# they are not set. The go-fips toolchain carries its own defaults and Chainguard's
+# documentation asks that they not be overridden.
 #
 # The build-time checks below were written from Chainguard's documentation rather than from
 # a build, since the images are gated. If one fails on a first licensed build, compare the
