@@ -170,7 +170,8 @@ services:
     # - USE_REDIS: Enable Redis as persistent data store (1 = enabled)
     # - REDIS_URL: Connection string for Redis
     # - ENV_DATASTORE_PREFIX: Prefix for Redis keys (includes environment ID)
-    # - CORS_ALLOW_ORIGIN: CORS configuration for browser access
+    # - ENV_ALLOWED_ORIGIN: comma-delimited CORS allowlist. Without it the relay reflects
+    #   whatever Origin the browser sends.
     environment:
       - AUTO_CONFIG_KEY=${RELAY_PROXY_CONFIG_KEY}
       - PORT=8030
@@ -178,7 +179,7 @@ services:
       - USE_REDIS=1
       - REDIS_URL=redis://redis:6379
       - ENV_DATASTORE_PREFIX=ld-flags-$$CID
-      - CORS_ALLOW_ORIGIN=http://localhost:${NODE_SERVICE_PORT:-3000}
+      - ENV_ALLOWED_ORIGIN=http://localhost:${DASHBOARD_PORT:-8000},http://localhost:${NODE_SERVICE_PORT:-3000}
       - HTTP_PROXY=http://172.18.0.80:3128
       - HTTPS_PROXY=http://172.18.0.80:3128
       - NO_PROXY=redis,172.18.0.50,localhost,127.0.0.1
