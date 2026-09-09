@@ -392,6 +392,12 @@ docker-compose --env-file .env.instance2 -p demo-instance2 up -d
 - Instance 1 Dashboard: http://localhost:8000
 - Instance 2 Dashboard: http://localhost:9000
 
+Remapping the ports handles host-side conflicts only. Each service also takes a static
+`ipv4_address` on `launchdarkly-network`, whose name `docker-compose.yml` pins so the
+documented `docker run --network launchdarkly-network ...` probe commands resolve. The
+second project joins that same network and its containers collide on the same nine
+addresses, so a second stack needs its own network name and subnet in an overlay file.
+
 ### Example 4: Development vs Production Ports
 
 Use different ports for development and production:

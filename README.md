@@ -558,6 +558,13 @@ Start the second instance:
 docker-compose --env-file .env.instance2 -p demo-instance2 up -d
 ```
 
+Remapping the ports is not sufficient on its own. Every service takes a static
+`ipv4_address` on `launchdarkly-network`, and `docker-compose.yml` pins that network name
+so the documented `docker run --network launchdarkly-network ...` probe commands resolve.
+A second project therefore joins the same network and its containers collide on the same
+nine addresses. To run two stacks at once, also give the second one its own network name
+and subnet in an overlay file.
+
 ### CORS Implications
 
 When you change the dashboard port, the backend services automatically update their CORS (Cross-Origin Resource Sharing) configurations to allow requests from the new port. This is handled automatically through environment variables:

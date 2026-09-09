@@ -6,7 +6,6 @@
 
 services:
   relay-proxy:
-    # See docker-compose-fips.yml for why the local build needs its own tag.
     image: ld-relay-lab:chainguard-fips
     build:
       context: ./relay-proxy

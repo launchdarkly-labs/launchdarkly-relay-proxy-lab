@@ -368,6 +368,9 @@ services:
 # All containers communicate over this network using container names as hostnames
 networks:
   launchdarkly-network:
+    # Unprefixed, so the documented `docker run --network launchdarkly-network` probe
+    # commands resolve. Compose would otherwise prepend the project name.
+    name: launchdarkly-network
     driver: bridge
     ipam:
       config:

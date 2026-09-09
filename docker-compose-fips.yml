@@ -5,10 +5,7 @@
 
 services:
   relay-proxy:
-    # Name the local build so it does not overwrite the upstream tag the base compose file
-    # pulls. Without this, `build` writes the hardened image over
-    # launchdarkly/ld-relay:<version>, and a later `docker compose up -d` without this
-    # overlay reuses the local image while appearing to run the official one.
+    # Own tag, so the local build does not overwrite the upstream image the base file pulls.
     image: ld-relay-lab:fips-hardened
     build:
       context: ./relay-proxy
