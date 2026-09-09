@@ -141,17 +141,20 @@ and `mldsa_available` can display a false negative with no way for the reader to
 The shipped `Dockerfile` builds with Go 1.27 and `inprocess` so the probe can see everything
 `Dockerfile.cnsa` produces.
 
-## Consuming it from a service
+## If you wire this into api-service
+
+Nothing calls the probe today — it is invoked by hand, and the notes below are a design
+sketch for adding an endpoint rather than a description of one that exists.
 
 The probe writes JSON to stdout and diagnostics to stderr, so stdout parses directly. It is
 a one-shot container: it exits after printing.
 
 `api-service` already runs sibling containers this way (see
-`api-service/src/docker/squidProxyControl.js`), so the same `child_process` pattern applies:
-run `docker run --rm --network launchdarkly-network ld-relay-lab:crypto-probe -target
+`api-service/src/docker/squidProxyControl.js`), so the same `child_process` pattern would
+apply: run `docker run --rm --network launchdarkly-network ld-relay-lab:crypto-probe -target
 <host:port>`, parse stdout, return it.
 
-Two things worth handling in whatever consumes this:
+Three things worth handling in whatever consumes this:
 
 A missing image is the common first-run failure, since the probe is not built by the base
 compose file. Worth distinguishing from a probe that ran and failed.
