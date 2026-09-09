@@ -1,10 +1,40 @@
 # syntax=docker/dockerfile:1
 #
-# LaunchDarkly ld-relay v8 Dockerfile with Chainguard go-fips substituted for golang:alpine:
+# Relay Proxy built with Chainguard's go-fips toolchain, so crypto runs in FIPS-validated
+# OpenSSL rather than in Go. Based on the ld-relay v8 Dockerfile:
 # https://github.com/launchdarkly/ld-relay/blob/v8/Dockerfile
 # https://images.chainguard.dev/directory/image/go-fips/overview
+#
+# Needs a commercial Chainguard license. go-fips and glibc-openssl-fips are commercial-tier
+# images, so the build requires an org with a FIPS entitlement:
+#
+#   1. Install chainctl:  https://edu.chainguard.dev/chainguard/chainctl/
+#   2. chainctl auth login
+#   3. Add your org to .env:  CHAINGUARD_ORG=your-org
+#   4. docker compose -f docker-compose.yml -f docker-compose-chainguard.yml up -d --build
+#
+# Without an entitled org the build stops at the first FROM with a registry auth error.
+# Dockerfile.fips needs no license and shows the same post-quantum key exchange through
+# Go's own FIPS module.
+#
+# How this differs from Dockerfile.fips, which matters when tracing crypto to a certificate:
+#
+#   Dockerfile.fips   Go's native Cryptographic Module. CGO_ENABLED=0, static binary,
+#                     crypto inside the binary, with GODEBUG=fips140=on.
+#
+#   this file         Chainguard's FIPS-validated OpenSSL through CGO, via the go-fips
+#                     toolchain's systemcrypto build tag. Crypto lives in libcrypto,
+#                     outside the binary, and the certificate is Chainguard's.
+#
+# GOFIPS140 and the fips140 GODEBUG belong to the Go module and have no effect here, so
+# they are not set. The go-fips toolchain carries its own defaults and Chainguard's
+# documentation asks that they not be overridden.
+#
+# The build-time checks below were written from Chainguard's documentation rather than from
+# a build, since the images are gated. If one fails on a first licensed build, compare the
+# real output against what it expects before changing the build.
 
-ARG LD_RELAY_VERSION=9.0.0-rc.5
+ARG LD_RELAY_VERSION=9.0.0-rc.6
 ARG CHAINGUARD_ORG
 
 FROM cgr.dev/${CHAINGUARD_ORG}/go-fips:latest AS builder
@@ -20,15 +50,90 @@ ADD https://github.com/launchdarkly/ld-relay/archive/refs/tags/v${LD_RELAY_VERSI
 RUN tar -xzf /tmp/ld-relay.tar.gz -C $SRC_DIR --strip-components=1 \
     && rm /tmp/ld-relay.tar.gz
 
-# Use go-fips toolchain defaults (CGO, systemcrypto, requirefips) — do not override per Chainguard docs
+# Enable the ML-KEM hybrid key exchange groups on the NIST P curves: SecP256r1MLKEM768 and
+# SecP384r1MLKEM1024.
+#
+# This applies here as much as to the native build, because TLS group selection happens in
+# Go's crypto/tls regardless of which module performs the primitives. The `go` directive in
+# a module's go.mod selects Go's compatibility defaults, and Go bakes them into the binary.
+# Release 9.0.0-rc.6 declares `go 1.25.10`, which still carries tlssecpmlkem=0 and turns
+# those two groups off.
+#
+# Left alone, the relay serves post-quantum key exchange to browsers and silently falls back
+# to classical ECDH for a client offering only the NIST-curve groups. The downgrade is
+# invisible: X25519MLKEM768 stays enabled and satisfies most clients, so the handshake
+# succeeds and the relay logs nothing.
+#
+# The godebug directive changes that one default without raising the module's minimum
+# toolchain. Skipped if already present, so it becomes a no-op when a future release ships it.
+RUN if grep -q '^godebug tlssecpmlkem=' go.mod; then \
+      echo "skipped: go.mod already sets tlssecpmlkem"; \
+    else \
+      printf '\ngodebug tlssecpmlkem=1\n' >> go.mod && \
+      echo "patched: go.mod godebug tlssecpmlkem=1"; \
+    fi
+
+# Use go-fips toolchain defaults (CGO, systemcrypto, requirefips); do not override per Chainguard docs
 RUN go build -a -o ldr .
+
+# Identify the crypto boundary for anyone tracing it to a certificate. A CGO build spans two
+# components with separate certificates: the OpenSSL module performing the primitives, and
+# the Go toolchain linked against it.
+#
+# Each lookup falls back to a readable message instead of failing, so the block still reports
+# something if a tool is missing from the builder image.
+RUN set -e; \
+    echo "===================================================================="; \
+    echo " FIPS 140-3 crypto boundary"; \
+    echo "===================================================================="; \
+    echo " mechanism      : OpenSSL via CGO (Chainguard go-fips, systemcrypto)"; \
+    echo "                  dynamically linked; crypto lives outside the Go binary"; \
+    echo "                  not the Go native module used by Dockerfile.fips"; \
+    echo "--------------------------------------------------------------------"; \
+    echo " OpenSSL (performs the primitives; holds the FIPS certificate)"; \
+    echo "   openssl      : $(openssl version 2>/dev/null || echo 'openssl CLI not in builder')"; \
+    echo "   provider     : $(openssl list -providers 2>/dev/null | tr '\n' ' ' || echo 'unavailable')"; \
+    echo "   linked libs  : $(ldd ldr 2>/dev/null | grep -iE 'crypto|ssl' | tr -s ' ' | tr '\n' ' ' || echo 'none found; build may not be CGO-linked')"; \
+    echo " Go toolchain linked against it"; \
+    echo "   toolchain    : $(go version)"; \
+    echo "   build tags   : $(go version -m ldr 2>/dev/null | grep -E 'tags|systemcrypto|requirefips' | tr -s ' ' | tr '\n' ' ' || echo 'not reported')"; \
+    echo " built          : $(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
+    echo "--------------------------------------------------------------------"; \
+    echo " Look up the certificate by searching CMVP for the OpenSSL module and"; \
+    echo " version above. The certificate is Chainguard's."; \
+    echo "   validated : https://csrc.nist.gov/projects/cryptographic-module-validation-program/validated-modules"; \
+    echo "   Chainguard FIPS: https://images.chainguard.dev/directory/image/go-fips/overview"; \
+    echo "===================================================================="
+
+# Confirm crypto actually routes through OpenSSL. A go-fips build that falls back to pure Go
+# still produces a working relay, with no FIPS boundary and nothing in the logs to say so,
+# which is why this is checked at build time.
+RUN if ldd ldr 2>/dev/null | grep -qiE 'libcrypto|libssl'; then \
+      echo "verified: binary dynamically linked against OpenSSL"; \
+    else \
+      echo "ERROR: ldr is not linked against libcrypto/libssl. A go-fips build should be." >&2; \
+      echo "       CGO may be disabled, or the build fell back to pure Go crypto." >&2; \
+      ldd ldr 2>&1 | head -20 >&2; \
+      exit 1; \
+    fi && \
+    ! go version -m ldr | grep -q 'tlssecpmlkem=0' && \
+    echo "verified: ML-KEM hybrid key exchange not disabled"
 
 FROM cgr.dev/${CHAINGUARD_ORG}/glibc-openssl-fips:latest
 
 ARG SRC_DIR=/go/ld-relay
+ARG LD_RELAY_VERSION
 
 COPY --from=builder --chown=nonroot:nonroot /empty-ldr /ldr
 COPY --from=builder ${SRC_DIR}/ldr /usr/bin/ldr
+
+# fips140.mechanism separates this image from the native-module build. The two look alike
+# once running, and the mechanism determines whose certificate applies.
+LABEL org.opencontainers.image.title="LaunchDarkly Relay Proxy (Chainguard go-fips)" \
+      org.opencontainers.image.version="${LD_RELAY_VERSION}" \
+      com.launchdarkly.relay.fips140.mechanism="openssl-cgo-chainguard" \
+      com.launchdarkly.relay.fips140.requires-license="chainguard-commercial" \
+      com.launchdarkly.relay.pqc.mlkem="all-three-groups"
 
 USER nonroot:nonroot
 

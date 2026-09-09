@@ -5,8 +5,11 @@
 
 services:
   relay-proxy:
+    # Own tag, so the local build does not overwrite the upstream image the base file pulls.
+    image: ld-relay-lab:fips-hardened
     build:
       context: ./relay-proxy
       dockerfile: Dockerfile.fips
       args:
-        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-9.0.0-rc.5}
+        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-9.0.0-rc.6}
+        GOFIPS140: ${GOFIPS140:-v1.0.0}

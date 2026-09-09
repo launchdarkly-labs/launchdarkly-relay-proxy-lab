@@ -140,12 +140,216 @@ docker-compose logs -f
 # Default — official LaunchDarkly image
 docker compose up -d
 
-# LaunchDarkly native FIPS (GOFIPS140, relay-proxy/Dockerfile.fips)
+# Native Go FIPS 140-3 + post-quantum (relay-proxy/Dockerfile.fips)
+# No license needed. Start here.
 docker compose -f docker-compose.yml -f docker-compose-fips.yml up -d --build
 
-# Chainguard go-fips only (relay-proxy/Dockerfile.chainguard; set CHAINGUARD_ORG in .env)
+# Chainguard go-fips — OpenSSL-backed FIPS (relay-proxy/Dockerfile.chainguard)
+# Needs a commercial Chainguard license; see "Chainguard build" below.
+docker compose -f docker-compose.yml -f docker-compose-chainguard.yml up -d --build
+
+# CNSA 2.0 posture: adds ML-DSA-87 signatures, trades the CMVP certificate
+# Needs Go 1.27 and the in-process FIPS module; see "CNSA 2.0 posture" below.
+docker compose -f docker-compose.yml -f docker-compose-cnsa.yml up -d --build
+```
+
+All three hardened builds compile the relay from the upstream `LD_RELAY_VERSION` release
+tarball rather than pulling a published image, so the crypto configuration is a build-time
+choice.
+
+#### What the hardened builds change
+
+Four things, on top of what the official image does.
+
+**Post-quantum key exchange is enabled.** The relay's `go.mod` declares `go 1.24.0`, and
+that directive bakes `tlssecpmlkem=0` into the binary, which disables the two ML-KEM hybrid
+groups on the NIST P curves. A newer Go toolchain does not override a module's
+compatibility defaults. Both Dockerfiles append `godebug tlssecpmlkem=1` before building,
+guarded so the patch no-ops once upstream ships the line.
+
+The failure this prevents is silent. `X25519MLKEM768` stays enabled, so browsers negotiate
+post-quantum normally and a smoke test passes. A FIPS-constrained client offering only
+NIST-curve PQC gets classical ECDH, the handshake succeeds, and the relay logs nothing.
+
+**The validated FIPS module is linked, in permissive mode.** `Dockerfile.fips` sets
+`GODEBUG=fips140=on`, so `fips140.Enforced()` reports false.
+
+`fips140=only` is the enforcing mode and cannot be used here. The LaunchDarkly evaluation
+engine hashes context keys with SHA-1 to compute percentage rollout buckets
+(`go-server-sdk-evaluation v3.0.1`, `evaluator_bucketing.go:99`), and `crypto/sha1` panics
+unconditionally under `only`. The relay then panics on every client-side flag evaluation
+with `crypto/sha1: use of SHA-1 is not allowed in FIPS 140-only mode`. LaunchDarkly's
+published FIPS guidance specifies `on` for this reason.
+
+Measured cost of `on` versus `only`: direct calls to MD5, 3DES and RC4 stop panicking and
+become reachable. TLS behavior is unchanged. TLS 1.0 and 1.1 are refused under both modes,
+negotiated suites are identical, and all three ML-KEM hybrid groups work under both.
+
+**No legacy cipher suite is negotiable, and the build proves it.** RC4, DES, MD5 and SHA-1
+stay linked in any Go binary that imports `crypto/tls` or `crypto/x509`, so "absent from
+the image" is not a claim this project can make. `relay-proxy/tlsassert` runs during the
+build and offers each legacy suite in a raw ClientHello against a server with no suite
+restriction:
+
+```
+result : 0 of 13 legacy configurations negotiable
+```
+
+That covers RC4, 3DES, RSA-CBC-SHA, NULL, anonymous DH, and TLS 1.0/1.1. The tool carries a
+positive control and exits 2 if its own ClientHello stops working, so a broken test is
+distinguishable from a real finding.
+
+**The build identifies its own crypto boundary.** Each build prints the module it linked and
+where to look the certificate up. `Dockerfile.fips` also writes this into the image at
+`/etc/launchdarkly/`, so it is readable from a running container:
+
+```bash
+docker run --rm --entrypoint /bin/sh ld-relay-lab:fips-hardened \
+  -c 'cat /etc/launchdarkly/fips-readme'
+```
+
+No CMVP certificate number is hardcoded anywhere. A pinned number asserts a validation
+status that can go stale without the build changing, and it is the field an assessor copies
+down. The build emits the module identity and the CMVP search URLs instead.
+
+Each build asserts its own hardening. Dropping `GOFIPS140`, failing to apply the `go.mod`
+patch, or a toolchain change that reintroduces a legacy suite fails the build. If an
+assertion trips, diagnose it — deleting the check ships an image that looks hardened and is
+not.
+
+#### FIPS module selection
+
+`Dockerfile.fips` defaults to `GOFIPS140=v1.0.0`, which resolves to the module Go
+classifies as `certified`. To build against the in-process module instead — it adds ML-DSA,
+the post-quantum *signature* algorithm, but is Pending Review rather than validated:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose-fips.yml build \
+  --build-arg GOFIPS140=inprocess
+```
+
+The build log reports which module resolved and how it was classified. Validation status is
+derived from the toolchain's own `/usr/local/go/lib/fips140/{certified,inprocess}.txt`
+rather than passed in as a build arg, so a label cannot claim a status the linked module
+lacks. When resolving `GOFIPS140`, note that `certified.txt` holds a patch-suffixed version
+(`v1.0.0-c2097c7c`) while a bare `v1.0.0.txt` alias also exists; match through the alias
+file, because a string comparison against `certified.txt` will miss.
+
+#### CNSA 2.0 posture
+
+CNSA 2.0 names four algorithm families. Two are reachable in this component, and the build
+reports which:
+
+| Requirement | Algorithm | Status |
+| --- | --- | --- |
+| Key establishment | ML-KEM-768 / ML-KEM-1024 (FIPS 203) | Met, all three hybrid groups |
+| Authentication | ML-DSA-87 (FIPS 204) | Met with `Dockerfile.cnsa` |
+| Symmetric encryption | AES-256 | Not reachable |
+| Hashing | SHA-384 | Not reachable |
+
+AES-256 is not selectable: Go fixes TLS 1.3 cipher suite preference in the standard library
+and ignores `tls.Config.CipherSuites` for 1.3. A handshake negotiating ML-KEM-1024 with an
+ML-DSA-87 certificate still lands on `TLS_AES_128_GCM_SHA256`. Hashing follows suite
+selection. Neither has a GODEBUG override, so no configuration reaches them.
+
+`Dockerfile.cnsa` adds ML-DSA-87 authentication on top of `Dockerfile.fips`, which needs
+Go 1.27 (`crypto/mldsa` does not exist before it) and the in-process FIPS module:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose-cnsa.yml up -d --build
+```
+
+ML-DSA costs the CMVP certificate, because Go ships two FIPS modules and only one is
+validated.
+
+| | `GOFIPS140=certified` | `GOFIPS140=inprocess` |
+| --- | --- | --- |
+| Module | `v1.0.0-c2097c7c` | `v1.26.0` |
+| CMVP | Validated, holds a certificate | Modules In Process, Pending Review |
+| ML-DSA | Absent | Available |
+| CNSA families met | 1 of 4 | 2 of 4 |
+| Dockerfile | `Dockerfile.fips` | `Dockerfile.cnsa` |
+
+Go states the constraint directly. Building `Dockerfile.cnsa` with the validated module
+fails with `mldsa: unavailable in FIPS 140-3 Go Cryptographic Module v1.0.0`.
+
+Which posture a customer wants depends on a question only their assessor answers: whether
+an in-process module is acceptable as interim evidence. `Dockerfile.fips` stays the default
+because naming a certificate number is usually the harder requirement.
+
+To keep the validated module and give up post-quantum authentication, build the CNSA image
+with a classical certificate. ML-KEM key exchange is unaffected:
+
+```bash
+CERT_ALG=ecdsa-p384 docker compose -f docker-compose.yml -f docker-compose-cnsa.yml up -d --build
+```
+
+#### Certificate generation
+
+No public CA issues ML-DSA certificates yet, so `relay-proxy/certgen` issues the one the
+relay serves. `Dockerfile.cnsa` runs it during the build and the relay picks it up through
+`TLS_CERT` / `TLS_KEY`.
+
+```bash
+cd relay-proxy/certgen
+GOFIPS140=inprocess go run . -alg mldsa87 -out /tmp/certs -hosts relay-proxy,localhost
+```
+
+Certificates are self-signed and sized for a lab: an ML-DSA-87 certificate is around 7.5 KB
+DER against roughly 500 bytes for ECDSA P-384. Clients skip verification or trust the
+generated certificate. This shows the relay can serve an ML-DSA certificate. Issuing one
+from a customer's own CA is theirs to arrange.
+
+`-alg` accepts `mldsa87`, `mldsa65`, `mldsa44`, `ecdsa-p384`, and `ecdsa-p256`. The tool
+writes `tls.alg` next to the certificate so the build can assert on the algorithm without a
+certificate parser.
+
+#### Measuring what a relay negotiates
+
+A relay can have all three hybrid groups compiled in and still hand a client classical
+ECDH, with a successful handshake and nothing in the logs. `relay-proxy/crypto-probe`
+performs real handshakes and prints what came back as JSON:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose-cnsa.yml build crypto-probe
+docker run --rm --network launchdarkly-network ld-relay-lab:crypto-probe \
+  -target relay-proxy:8030
+```
+
+Against a relay built without `godebug tlssecpmlkem=1`, the NIST-curve profiles fail while
+`x25519` succeeds, and key establishment reports `unmet` naming the profiles that failed.
+
+Measuring this needs a TLS stack that supports ML-KEM group selection, which Node and the
+browser do not expose, so anything building a UI on these numbers has to call the probe.
+Output shape, status semantics, and the build-posture caveat are in
+[relay-proxy/crypto-probe/README.md](relay-proxy/crypto-probe/README.md).
+
+#### Chainguard build
+
+`Dockerfile.chainguard` uses Chainguard's `go-fips` toolchain, where crypto is performed by
+FIPS-validated OpenSSL through CGO rather than inside the Go binary. That makes it a
+different mechanism from `Dockerfile.fips`, not a variant of it: `GOFIPS140` and the fips140
+GODEBUG belong to the Go module and are absent here deliberately, and the two hold different
+vendors' CMVP certificates. Never carry a certificate number or validation status from one
+image to the other; the `fips140.mechanism` labels tell them apart once running.
+
+Those images are commercial-tier:
+
+```bash
+# 1. Install chainctl — https://edu.chainguard.dev/chainguard/chainctl/
+# 2. chainctl auth login
+# 3. Add your org to .env
+echo 'CHAINGUARD_ORG=your-org' >> .env
+# 4. Build
 docker compose -f docker-compose.yml -f docker-compose-chainguard.yml up -d --build
 ```
+
+Without an entitled org the build stops at the first `FROM` with a registry auth error. Use
+`Dockerfile.fips` instead, which needs no license and demonstrates the same post-quantum
+behavior.
+
+Its build-time checks have not been run against the real toolchain, since the images are
+gated. If one trips on your first build, the check is more likely wrong than your build.
 
 ### 4. Changing Configuration
 
@@ -353,6 +557,13 @@ Start the second instance:
 ```bash
 docker-compose --env-file .env.instance2 -p demo-instance2 up -d
 ```
+
+Remapping the ports is not sufficient on its own. Every service takes a static
+`ipv4_address` on `launchdarkly-network`, and `docker-compose.yml` pins that network name
+so the documented `docker run --network launchdarkly-network ...` probe commands resolve.
+A second project therefore joins the same network and its containers collide on the same
+nine addresses. To run two stacks at once, also give the second one its own network name
+and subnet in an overlay file.
 
 ### CORS Implications
 
@@ -1077,10 +1288,17 @@ This application uses a microservices architecture with nine specialized contain
 - Purpose: User interface with embedded JavaScript SDK demonstration
 
 **relay-proxy** (Relay Proxy Container):
-- LaunchDarkly Relay Proxy v9.0.0-rc.5 (FDv2 `/sdk/stream` for the Data System Builder)
+- LaunchDarkly Relay Proxy v9.0.0-rc.6 (FDv2 `/sdk/stream` for the Data System Builder)
 - Default: official `launchdarkly/ld-relay` image (`docker-compose.yml`)
-- FIPS: local build via `docker-compose-fips.yml` + `relay-proxy/Dockerfile.fips` (native Go `GOFIPS140=v1.0.0`)
-- Chainguard: local build via `docker-compose-chainguard.yml` + `relay-proxy/Dockerfile.chainguard`
+- FIPS: local build via `docker-compose-fips.yml` + `relay-proxy/Dockerfile.fips`: native Go
+  Cryptographic Module (`GOFIPS140=v1.0.0`), static binary, `GODEBUG=fips140=on`, ML-KEM
+  hybrid key exchange enabled, no legacy cipher suite negotiable. No license required
+- Chainguard: local build via `docker-compose-chainguard.yml` + `relay-proxy/Dockerfile.chainguard`:
+  FIPS-validated OpenSSL via CGO, dynamically linked. Requires a commercial Chainguard license
+- CNSA: local build via `docker-compose-cnsa.yml` + `relay-proxy/Dockerfile.cnsa`: adds
+  ML-DSA-87 authentication and sets `TLS_ENABLED=true`, so SDK containers pointed at
+  `http://relay-proxy:8030` will not connect under it. Trades the CMVP certificate for the
+  in-process module
 - AutoConfig mode
 - Event forwarding enabled
 - Redis integration for persistent storage

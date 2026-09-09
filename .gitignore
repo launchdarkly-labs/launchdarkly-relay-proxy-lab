@@ -108,6 +108,9 @@ dist
 # Kiro AI assistant files (optional - remove if you want to commit specs)
 .kiro/
 
+# Claude Code local MCP server config (contains per-machine server selection)
+.mcp.json
+
 # PHP temporary files
 php/vendor/
 php/composer.lock

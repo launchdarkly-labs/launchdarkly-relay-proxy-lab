@@ -1,0 +1,44 @@
+# CNSA 2.0 posture: Go 1.27 with the in-process FIPS module, ML-DSA-87 certificate, TLS on.
+#
+# This trades the CMVP certificate for post-quantum signatures. The in-process module has
+# ML-DSA; the validated module does not. Use docker-compose-fips.yml for the validated
+# posture.
+#
+#   docker compose -f docker-compose.yml -f docker-compose-cnsa.yml up -d --build
+#
+# TLS is on here, so SDK containers pointed at http://relay-proxy:8030 will not connect.
+# That is the point of running it as a separate posture rather than the default: use this
+# overlay to inspect the handshake, and the plaintext overlays to exercise the SDKs.
+
+services:
+  relay-proxy:
+    image: ld-relay-lab:cnsa
+    build:
+      context: ./relay-proxy
+      dockerfile: Dockerfile.cnsa
+      args:
+        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-9.0.0-rc.6}
+        # inprocess is required for ML-DSA. Setting this to `certified` fails the build's
+        # certificate assertion, which is the intended way to discover the tradeoff.
+        GOFIPS140: ${GOFIPS140:-inprocess}
+        # ecdsa-p384 keeps ML-KEM key exchange and drops post-quantum authentication.
+        CERT_ALG: ${CERT_ALG:-mldsa87}
+
+  # Builds the crypto probe image without running it. The probe is a one-shot container
+  # that prints JSON and exits, so it is invoked on demand rather than kept up:
+  #
+  #   docker run --rm --network launchdarkly-network ld-relay-lab:crypto-probe \
+  #     -target relay-proxy:8030
+  #
+  # `profiles` keeps it out of `up`. `docker compose ... build crypto-probe` still builds
+  # it, and so does `--profile tools up --build`.
+  crypto-probe:
+    profiles: ["tools"]
+    image: ld-relay-lab:crypto-probe
+    build:
+      context: ./relay-proxy/crypto-probe
+      args:
+        # Matches the relay's module so the probe can observe ML-DSA. Built against the
+        # validated module it reports ML-DSA unavailable even when the relay serves an
+        # ML-DSA certificate. See relay-proxy/crypto-probe/README.md.
+        GOFIPS140: ${GOFIPS140:-inprocess}
