@@ -5,8 +5,14 @@
 
 services:
   relay-proxy:
+    # Name the local build so it does not overwrite the upstream tag the base compose file
+    # pulls. Without this, `build` writes the hardened image over
+    # launchdarkly/ld-relay:<version>, and a later `docker compose up -d` without this
+    # overlay reuses the local image while appearing to run the official one.
+    image: ld-relay-lab:fips-hardened
     build:
       context: ./relay-proxy
       dockerfile: Dockerfile.fips
       args:
-        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-9.0.0-rc.5}
+        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-9.0.0-rc.6}
+        GOFIPS140: ${GOFIPS140:-v1.0.0}

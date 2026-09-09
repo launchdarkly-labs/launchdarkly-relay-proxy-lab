@@ -43,11 +43,14 @@
 #
 # Build args:
 #
-#   LD_RELAY_VERSION  upstream release tag to compile (default 8.16.4)
+#   LD_RELAY_VERSION  upstream release tag to compile (default 9.0.0-rc.6)
 #   CERT_ALG          certificate signature algorithm (default mldsa87). ecdsa-p384 falls
 #                     back to classical authentication while keeping ML-KEM key exchange.
 
-ARG LD_RELAY_VERSION=8.16.4
+# Keep in step with Dockerfile.fips, which this layers on. A skew between the two means the
+# CNSA posture is measured against a different relay than the FIPS baseline it is compared
+# to. See that file for why the pin is a 9.x rc.
+ARG LD_RELAY_VERSION=9.0.0-rc.6
 ARG GOFIPS140=inprocess
 ARG CERT_ALG=mldsa87
 
@@ -76,9 +79,9 @@ RUN tar -xzf /tmp/ld-relay.tar.gz -C $SRC_DIR --strip-components=1 \
 # SecP384r1MLKEM1024.
 #
 # The `go` directive in a module's go.mod selects Go's compatibility defaults and Go bakes
-# them into the binary. Release 8.16.4 declares `go 1.24.0`, which carries tlssecpmlkem=0
-# and turns those two groups off. Building with a Go 1.27 toolchain does not change this,
-# because Go honors the module's declared version.
+# them into the binary. Release 9.0.0-rc.6 declares `go 1.25.10`, which still carries
+# tlssecpmlkem=0 and turns those two groups off. Building with a Go 1.27 toolchain does not
+# change this, because Go honors the module's declared version.
 #
 # Left alone, the relay serves post-quantum key exchange to browsers and silently falls back
 # to classical ECDH for a client offering only the NIST-curve groups. The downgrade is

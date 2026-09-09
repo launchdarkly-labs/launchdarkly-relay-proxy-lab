@@ -34,7 +34,7 @@ Fetches the current status of the LaunchDarkly Relay Proxy.
         }
       }
     },
-    "version": "9.0.0-rc.5"
+    "version": "9.0.0-rc.6"
   }
 }
 ```

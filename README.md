@@ -1281,7 +1281,7 @@ This application uses a microservices architecture with nine specialized contain
 - Purpose: User interface with embedded JavaScript SDK demonstration
 
 **relay-proxy** (Relay Proxy Container):
-- LaunchDarkly Relay Proxy v9.0.0-rc.5 (FDv2 `/sdk/stream` for the Data System Builder)
+- LaunchDarkly Relay Proxy v9.0.0-rc.6 (FDv2 `/sdk/stream` for the Data System Builder)
 - Default: official `launchdarkly/ld-relay` image (`docker-compose.yml`)
 - FIPS: local build via `docker-compose-fips.yml` + `relay-proxy/Dockerfile.fips`: native Go
   Cryptographic Module (`GOFIPS140=v1.0.0`), static binary, `GODEBUG=fips140=on`, ML-KEM

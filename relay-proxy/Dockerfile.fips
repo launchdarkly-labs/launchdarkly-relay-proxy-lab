@@ -17,7 +17,7 @@
 #
 # Build args:
 #
-#   LD_RELAY_VERSION  upstream release tag to compile (default 8.16.4)
+#   LD_RELAY_VERSION  upstream release tag to compile (default 9.0.0-rc.6)
 #   GOFIPS140         which Go Cryptographic Module to link. `v1.0.0` or `certified` is
 #                     the validated module. `v1.26.0` or `inprocess` is under review and
 #                     adds ML-DSA, the post-quantum signature algorithm.
@@ -30,7 +30,19 @@
 ARG GOFIPS140=v1.0.0
 # Declared here as well as in each stage below. An ARG re-declared in a later stage starts
 # empty unless the value was passed with --build-arg, which leaves the runtime LABEL blank.
-ARG LD_RELAY_VERSION=8.16.4
+#
+# Keep this default identical to the builder stage's. The runtime stage re-declares
+# LD_RELAY_VERSION with no default and feeds it to the version LABEL, so it resolves to
+# this global value. A default here that disagrees with the one the builder compiles makes
+# the image label a version it does not contain.
+#
+# 9.x is a requirement of the lab: the Data System Builder demo in data-system/app.py calls
+# datasystem.custom() with streaming_ds_builder(), which speaks FDv2 at /sdk/stream. That
+# route does not exist in 8.x, so that container cannot initialize against an 8.x relay.
+# Pinned to an rc because 9.0.0 has no stable release yet. rc.6 over rc.5 picks up the
+# grpc, x/net, x/text and OpenTelemetry CVE patches; its breaking changes are all OTel
+# attribute renames, which this lab does not use.
+ARG LD_RELAY_VERSION=9.0.0-rc.6
 
 FROM golang:1.26.4-alpine3.24 AS builder
 # See "Runtime platform versions" in CONTRIBUTING.md
@@ -40,7 +52,11 @@ RUN apk --no-cache add \
  && rm -rf /var/cache/apk/*
 
 ARG SRC_DIR=/go/ld-relay
-ARG LD_RELAY_VERSION=9.0.0-rc.5
+ARG LD_RELAY_VERSION=9.0.0-rc.6
+# Re-declared for this stage. The global ARG above the first FROM does not carry into a
+# stage; without this line GOFIPS140 expands to empty in the ENV below, the module
+# resolution step resolves to '' and the build fails with "does not ship".
+ARG GOFIPS140=v1.0.0
 
 RUN mkdir -p $SRC_DIR
 
@@ -54,10 +70,11 @@ RUN tar -xzf /tmp/ld-relay.tar.gz -C $SRC_DIR --strip-components=1 \
 # SecP384r1MLKEM1024.
 #
 # The `go` directive in a module's go.mod selects Go's compatibility defaults, and Go bakes
-# them into every binary it builds. Release 8.16.4 declares `go 1.24.0`, which carries
-# tlssecpmlkem=0 and turns those two groups off. A newer builder toolchain does not change
-# this; Go honors the module's declared version, so building with Go 1.26 still produces a
-# binary with the groups disabled.
+# them into every binary it builds. Release 9.0.0-rc.6 declares `go 1.25.10`, which still
+# carries tlssecpmlkem=0 and turns those two groups off; 8.16.4 declared `go 1.24.0` and had
+# the same default, so raising the directive did not fix this. A newer builder toolchain
+# does not change it either; Go honors the module's declared version, so building with Go
+# 1.26 still produces a binary with the groups disabled.
 #
 # Left alone, the relay serves post-quantum key exchange to browsers and silently falls
 # back to classical ECDH for a client that offers only the NIST-curve groups. The

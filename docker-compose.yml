@@ -160,7 +160,7 @@ services:
   # Health Check: None (relies on Redis health check)
   relay-proxy:
     container_name: relay-proxy
-    image: launchdarkly/ld-relay:${LD_RELAY_VERSION:-9.0.0-rc.5}
+    image: launchdarkly/ld-relay:${LD_RELAY_VERSION:-9.0.0-rc.6}
     ports:
       - "8030:8030"  # External:Internal - Relay proxy API
     # Environment Variables:

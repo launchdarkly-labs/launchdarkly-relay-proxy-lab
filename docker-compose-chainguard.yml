@@ -6,9 +6,11 @@
 
 services:
   relay-proxy:
+    # See docker-compose-fips.yml for why the local build needs its own tag.
+    image: ld-relay-lab:chainguard-fips
     build:
       context: ./relay-proxy
       dockerfile: Dockerfile.chainguard
       args:
-        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-9.0.0-rc.5}
+        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-9.0.0-rc.6}
         CHAINGUARD_ORG: ${CHAINGUARD_ORG}

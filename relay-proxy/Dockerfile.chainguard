@@ -34,7 +34,7 @@
 # a build, since the images are gated. If one fails on a first licensed build, compare the
 # real output against what it expects before changing the build.
 
-ARG LD_RELAY_VERSION=9.0.0-rc.5
+ARG LD_RELAY_VERSION=9.0.0-rc.6
 ARG CHAINGUARD_ORG
 
 FROM cgr.dev/${CHAINGUARD_ORG}/go-fips:latest AS builder
@@ -56,8 +56,8 @@ RUN tar -xzf /tmp/ld-relay.tar.gz -C $SRC_DIR --strip-components=1 \
 # This applies here as much as to the native build, because TLS group selection happens in
 # Go's crypto/tls regardless of which module performs the primitives. The `go` directive in
 # a module's go.mod selects Go's compatibility defaults, and Go bakes them into the binary.
-# Release 8.16.4 declares `go 1.24.0`, which carries tlssecpmlkem=0 and turns those two
-# groups off.
+# Release 9.0.0-rc.6 declares `go 1.25.10`, which still carries tlssecpmlkem=0 and turns
+# those two groups off.
 #
 # Left alone, the relay serves post-quantum key exchange to browsers and silently falls back
 # to classical ECDH for a client offering only the NIST-curve groups. The downgrade is

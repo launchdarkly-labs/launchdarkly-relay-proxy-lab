@@ -12,11 +12,13 @@
 
 services:
   relay-proxy:
+    # See docker-compose-fips.yml for why the local build needs its own tag.
+    image: ld-relay-lab:cnsa
     build:
       context: ./relay-proxy
       dockerfile: Dockerfile.cnsa
       args:
-        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-8.16.4}
+        LD_RELAY_VERSION: ${LD_RELAY_VERSION:-9.0.0-rc.6}
         # inprocess is required for ML-DSA. Setting this to `certified` fails the build's
         # certificate assertion, which is the intended way to discover the tradeoff.
         GOFIPS140: ${GOFIPS140:-inprocess}
